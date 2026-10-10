@@ -254,6 +254,12 @@ def _verdict(p_phishing: float) -> tuple[str, float]:
 
 
 def score_url(url: str, overrides: dict | None = None, with_network: bool = True) -> dict:
+    from urllib.parse import urlparse
+    clean_url = url if "://" in url else f"http://{url}"
+    parsed = urlparse(clean_url)
+    host_clean = (parsed.hostname or "").lower()
+    is_local_dev = host_clean in ("localhost", "127.0.0.1", "0.0.0.0", "::1") or host_clean.endswith(".local") or host_clean.endswith(".internal")
+
     # clip=True replicates the IQR bounds the training pipeline applied, so the
     # forest receives inputs from the same distribution it was fitted on.
     vector, named, clamped = extract_features(
@@ -264,6 +270,13 @@ def score_url(url: str, overrides: dict | None = None, with_network: bool = True
     scaled_df = pd.DataFrame(scaled, columns=FEATURE_ORDER)
     p_phishing = float(model.predict_proba(scaled_df)[0][PHISHING_INDEX])
     prediction, confidence = _verdict(p_phishing)
+
+    # When scanning local application/dev URLs (e.g. localhost:5173), normalize
+    # to legitimate zero-risk (unless explicit testing feature overrides were provided)
+    if is_local_dev and not overrides:
+        p_phishing = 0.0
+        prediction = "Legitimate"
+        confidence = 0.999
 
     unavailable = [name for name in FEATURE_ORDER if named[name] == -1]
 
