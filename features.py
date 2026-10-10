@@ -462,10 +462,20 @@ def _whois_features(domain: str) -> dict[str, float]:
         if value is None:
             return MISSING
         try:
-            delta = (time.time() - value.timestamp()) / 86400.0
+            if hasattr(value, "timestamp"):
+                ts = value.timestamp()
+            elif hasattr(value, "timetuple"):
+                ts = time.mktime(value.timetuple())
+            elif isinstance(value, str):
+                import datetime as dt_mod
+                parsed_dt = dt_mod.datetime.fromisoformat(value)
+                ts = parsed_dt.timestamp()
+            else:
+                return MISSING
+            delta = (time.time() - ts) / 86400.0
+            return int(delta if past else -delta)
         except Exception:
             return MISSING
-        return int(delta if past else -delta)
 
     out["time_domain_activation"] = to_days(record.creation_date, past=True)
     out["time_domain_expiration"] = to_days(record.expiration_date, past=False)
