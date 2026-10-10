@@ -62,46 +62,49 @@ const DeviceScanner = () => {
   const [fpModal, setFpModal] = useState({ open: false, scanId: '' });
   const [fpReason, setFpReason] = useState('');
 
-  // Handle file select
-  const handleFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-      setFileResult(null);
-    }
-  };
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-      setFileResult(null);
-    }
-  };
-
-  const handleScanFile = async () => {
-    if (!selectedFile) {
+  // Handle file scan (can be called automatically or manually)
+  const handleScanFile = async (fileToScan) => {
+    const file = fileToScan || selectedFile;
+    if (!file) {
       addToast('Please select a file to scan.', 'warning');
       return;
     }
     setFileScanning(true);
     setFileResult(null);
     try {
-      const res = await scanFile(selectedFile);
+      const res = await scanFile(file);
       setFileResult(res);
       if (res.verdict === 'Malicious') {
         addToast(`Threat detected: ${res.threat_category}`, 'error');
       } else if (res.verdict === 'Suspicious') {
-        addToast('File flagged as suspicious.', 'warning');
+        addToast(`Attention: ${res.threat_category}`, 'warning');
       } else {
-        addToast('File scanned clean! No threats found.', 'success');
+        addToast(`File scanned clean: ${res.threat_category || 'No threats detected'}`, 'success');
       }
     } catch (err) {
       addToast(err.message || 'File inspection failed.', 'error');
     } finally {
       setFileScanning(false);
+    }
+  };
+
+  // Handle file select — automatically scans immediately after file upload
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      handleScanFile(file);
+    }
+  };
+
+  // Handle file drop — automatically scans immediately upon drop
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      handleScanFile(file);
     }
   };
 
@@ -205,10 +208,26 @@ const DeviceScanner = () => {
               )}
             </div>
 
+            {/* Active Scanning Animation */}
+            {fileScanning && (
+              <div className="file-scanning-banner">
+                <div className="scanning-banner-content">
+                  <RefreshCw className="w-5 h-5 text-blue-400 animate-spin flex-shrink-0" />
+                  <div className="scanning-text-wrap">
+                    <span className="scanning-title">Analyzing File: Computing Cryptographic Hashes & Parsing Signatures...</span>
+                    <span className="scanning-sub">Validating headers, section tables, and threat database matching in memory</span>
+                  </div>
+                </div>
+                <div className="scanning-progress-bar">
+                  <div className="scanning-progress-fill" />
+                </div>
+              </div>
+            )}
+
             <div className="scanner-action-bar">
               <button
                 className="btn btn-primary"
-                onClick={handleScanFile}
+                onClick={() => handleScanFile(selectedFile)}
                 disabled={!selectedFile || fileScanning}
               >
                 {fileScanning ? (
@@ -219,7 +238,7 @@ const DeviceScanner = () => {
                 ) : (
                   <>
                     <ShieldCheck className="w-4 h-4 mr-2" />
-                    Scan File for Threats
+                    {selectedFile && fileResult ? 'Re-scan File' : 'Scan File for Threats'}
                   </>
                 )}
               </button>
@@ -301,6 +320,22 @@ const DeviceScanner = () => {
                         <li key={i}>{r}</li>
                       ))}
                     </ul>
+                  </div>
+                )}
+
+                {fileResult.pe_details && (
+                  <div className="pe-details-section">
+                    <h4>Windows PE Architecture & Section Headers:</h4>
+                    <p className="pe-meta-sub">
+                      Architecture: <strong>{fileResult.pe_details.architecture}</strong> • Total Sections: <strong>{fileResult.pe_details.section_count}</strong>
+                    </p>
+                    {fileResult.pe_details.sections?.length > 0 && (
+                      <div className="file-list-preview">
+                        {fileResult.pe_details.sections.map((sec, idx) => (
+                          <span key={idx} className="archive-tag">{sec}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 

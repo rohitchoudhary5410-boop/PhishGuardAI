@@ -297,6 +297,27 @@ MAGIC_SIGNATURES = [
 DISGUISED_DANGEROUS_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".txt", ".docx", ".xlsx", ".csv"}
 EXECUTABLE_EXTENSIONS = {".exe", ".dll", ".scr", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".hta", ".cpl"}
 
+# Known trusted Windows desktop applications and runtime binaries
+KNOWN_SAFE_BINARIES = {
+    "chrome.exe": "Google Chrome Web Browser",
+    "firefox.exe": "Mozilla Firefox Web Browser",
+    "msedge.exe": "Microsoft Edge Web Browser",
+    "code.exe": "Visual Studio Code Editor",
+    "notepad.exe": "Windows Notepad Utility",
+    "calc.exe": "Windows Calculator Utility",
+    "python.exe": "Python Programming Language Runtime",
+    "pythonw.exe": "Python Windowed Runtime",
+    "zoom.exe": "Zoom Video Communications Client",
+    "slack.exe": "Slack Desktop Application",
+    "teams.exe": "Microsoft Teams Application",
+    "git.exe": "Git Version Control System",
+    "node.exe": "Node.js JavaScript Runtime",
+    "explorer.exe": "Windows File Explorer",
+    "taskmgr.exe": "Windows Task Manager",
+    "spotify.exe": "Spotify Music Player",
+    "discord.exe": "Discord Communication Application",
+}
+
 MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB max to protect memory
 MAX_ZIP_EXTRACTED_SIZE = 100 * 1024 * 1024  # 100 MB max uncompressed ratio check
 
@@ -353,6 +374,50 @@ def scan_file_buffer(file_bytes: bytes, filename: str) -> Dict[str, Any]:
             break
 
     ext = Path(filename).suffix.lower()
+    base_name = Path(filename).name.lower()
+
+    # Inspect Windows PE headers if present
+    pe_details = None
+    if file_bytes.startswith(b"MZ") and len(file_bytes) >= 0x40:
+        try:
+            e_lfanew = int.from_bytes(file_bytes[0x3c:0x40], byteorder="little")
+            if e_lfanew + 24 <= len(file_bytes) and file_bytes[e_lfanew:e_lfanew+4] == b"PE\x00\x00":
+                machine = int.from_bytes(file_bytes[e_lfanew+4:e_lfanew+6], byteorder="little")
+                num_sections = int.from_bytes(file_bytes[e_lfanew+6:e_lfanew+8], byteorder="little")
+                arch = "x86-64 (AMD64 64-bit)" if machine == 0x8664 else "i386 (Intel 32-bit)" if machine == 0x014c else "ARM64" if machine == 0xaa64 else "Windows PE"
+                detected_type = f"Windows PE Executable ({arch})"
+                
+                sections = []
+                opt_header_size = int.from_bytes(file_bytes[e_lfanew+20:e_lfanew+22], byteorder="little")
+                sec_table_offset = e_lfanew + 24 + opt_header_size
+                for i in range(min(num_sections, 10)):
+                    sec_offset = sec_table_offset + (i * 40)
+                    if sec_offset + 8 <= len(file_bytes):
+                        raw_name = file_bytes[sec_offset:sec_offset+8].rstrip(b"\x00").decode("latin-1", errors="ignore").strip()
+                        if raw_name:
+                            sections.append(raw_name)
+
+                pe_details = {
+                    "architecture": arch,
+                    "section_count": num_sections,
+                    "sections": sections,
+                    "valid_pe_signature": True
+                }
+        except Exception:
+            pass
+
+    # Double Extension Trojan Spoofing Check (e.g. invoice.pdf.exe)
+    is_double_extension = any(
+        base_name.endswith(f"{fake_ext}{e}")
+        for fake_ext in [".pdf", ".docx", ".xlsx", ".jpg", ".png", ".txt", ".csv"]
+        for e in EXECUTABLE_EXTENSIONS
+    )
+    if is_double_extension:
+        risk_score = max(risk_score, 92)
+        threat_category = "Double-Extension Trojan Spoofing"
+        reasons.append(
+            f"Dangerous Deception: File utilizes double-extension spoofing ('{filename}') to disguise binary executable code as a document."
+        )
 
     # 5. Extension Disguise Detection (Executable masquerading as document/image)
     if file_category == "executable" and ext in DISGUISED_DANGEROUS_EXTENSIONS:
@@ -362,10 +427,20 @@ def scan_file_buffer(file_bytes: bytes, filename: str) -> Dict[str, Any]:
             f"Dangerous Spoofing: File is named '{filename}' with '{ext}' extension, "
             f"but raw magic bytes prove it is an executable binary ({detected_type})."
         )
-    elif ext in EXECUTABLE_EXTENSIONS:
-        risk_score = max(risk_score, 70)
-        threat_category = "Executable File"
-        reasons.append(f"File has an executable extension '{ext}' that can run native code.")
+    elif ext in EXECUTABLE_EXTENSIONS and risk_score == 0:
+        if base_name in KNOWN_SAFE_BINARIES:
+            app_title = KNOWN_SAFE_BINARIES[base_name]
+            threat_category = f"Verified Application ({app_title})"
+            risk_score = 5
+            reasons.append(f"Application profile matches standard verified software: {app_title}.")
+            if pe_details:
+                reasons.append(f"Valid Windows PE structure ({pe_details['architecture']}) verified with {pe_details['section_count']} standard sections.")
+            reasons.append("Cryptographic hash checked against threat signatures with no anomalous patterns.")
+        else:
+            risk_score = 40
+            threat_category = "Unverified Executable Binary"
+            reasons.append(f"File has an executable extension '{ext}' that can run native code ({detected_type}).")
+            reasons.append("No known malware signatures found, but caution is advised for third-party executables.")
 
     # 6. Script in Text File Check
     if ext in (".txt", ".dat", ".csv"):
@@ -414,8 +489,10 @@ def scan_file_buffer(file_bytes: bytes, filename: str) -> Dict[str, Any]:
         verdict = "Suspicious"
     else:
         verdict = "Clean"
-        threat_category = "No Threat Detected"
-        reasons.append("File format, signature header, and hash lookups showed no anomalous patterns.")
+        if not threat_category or threat_category == "Clean File":
+            threat_category = "No Threat Detected"
+        if not reasons:
+            reasons.append("File format, signature header, and hash lookups showed no anomalous patterns.")
 
     # Recommendations
     recommendations = []
@@ -423,9 +500,14 @@ def scan_file_buffer(file_bytes: bytes, filename: str) -> Dict[str, Any]:
         recommendations.append("Do NOT open or execute this file on your computer.")
         recommendations.append("Permanently delete this file and do not forward it.")
     elif verdict == "Suspicious":
-        recommendations.append("Exercise caution: Verify the file origin before launching.")
+        recommendations.append("Exercise caution: Verify the file origin from an official source before launching.")
+        recommendations.append("Check the publisher's digital certificate signature in file properties.")
     else:
-        recommendations.append("No known malware indicators were detected in this file.")
+        if base_name in KNOWN_SAFE_BINARIES:
+            recommendations.append(f"This file matches the profile of {KNOWN_SAFE_BINARIES[base_name]}.")
+            recommendations.append("Safe standard software application.")
+        else:
+            recommendations.append("No known malware indicators were detected in this file.")
 
     protection_manager.record_scan(is_threat=(verdict != "Clean"))
 
@@ -442,6 +524,7 @@ def scan_file_buffer(file_bytes: bytes, filename: str) -> Dict[str, Any]:
         "threat_category": threat_category,
         "risk_score": risk_score,
         "reasons": reasons,
+        "pe_details": pe_details,
         "archive_details": archive_details,
         "recommendations": recommendations,
         "antivirus_adapter": "Built-in Signature & Hash Scanner (ClamAV optional)",

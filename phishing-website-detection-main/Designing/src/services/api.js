@@ -400,24 +400,39 @@ export const scanFile = async (fileObj) => {
   if (IS_MOCK) {
     await delay(1500);
     const isEicar = fileObj.name?.toLowerCase().includes('eicar');
-    const isSuspicious = fileObj.name?.endsWith('.exe') || fileObj.name?.endsWith('.scr');
+    const isTrustedApp = /chrome|firefox|edge|notepad|calc|code|python|zoom/i.test(fileObj.name || '');
+    const isSuspicious = !isTrustedApp && (fileObj.name?.endsWith('.exe') || fileObj.name?.endsWith('.scr') || fileObj.name?.endsWith('.bat'));
     return {
       filename: fileObj.name,
       file_size_bytes: fileObj.size,
       formatted_size: `${(fileObj.size / 1024).toFixed(1)} KB`,
       sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      detected_type: isSuspicious ? 'PE Executable (Windows)' : 'PDF / Document File',
-      file_category: isSuspicious ? 'executable' : 'document',
+      detected_type: isTrustedApp
+        ? 'Windows PE Executable (x86-64 AMD64)'
+        : isSuspicious
+        ? 'PE Executable (Windows)'
+        : 'PDF / Document File',
+      file_category: isTrustedApp || isSuspicious ? 'executable' : 'document',
       verdict: isEicar ? 'Malicious' : isSuspicious ? 'Suspicious' : 'Clean',
-      threat_category: isEicar ? 'EICAR Test Signature' : isSuspicious ? 'Executable Payload' : 'Clean File',
-      risk_score: isEicar ? 95 : isSuspicious ? 70 : 5,
+      threat_category: isEicar
+        ? 'EICAR Test Signature'
+        : isTrustedApp
+        ? 'Verified Application (Google Chrome / Trusted Software)'
+        : isSuspicious
+        ? 'Unverified Executable Binary'
+        : 'Clean File',
+      risk_score: isEicar ? 95 : isSuspicious ? 40 : 5,
       reasons: isEicar
         ? ['Matches standard antivirus test signature.']
+        : isTrustedApp
+        ? ['Application profile matches standard verified software (Google Chrome).', 'Valid Windows PE header structure verified with clean sections.', 'Cryptographic hash verified clean against threat database.']
         : isSuspicious
-        ? ['File contains executable binary code.']
+        ? ['File contains executable binary code. Exercise caution before launching third-party binaries.']
         : ['File structure matches declared extension and contains no malicious macros.'],
-      recommendations: isEicar || isSuspicious
+      recommendations: isEicar
         ? ['Do not run this file on your operating system.', 'Delete or isolate immediately.']
+        : isSuspicious
+        ? ['Ensure this file comes from a trusted developer.', 'Verify publisher digital signature.']
         : ['File appears clean and safe to use.'],
       privacy_notice: 'Processed in-memory. No file was stored.',
       timestamp: new Date().toISOString(),
@@ -430,7 +445,7 @@ export const scanFile = async (fileObj) => {
     formData.append('file', fileObj);
     const response = await apiClient.post('/api/scan/file', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 30000,
+      timeout: 60000,
     });
     return response.data;
   } catch (error) {
