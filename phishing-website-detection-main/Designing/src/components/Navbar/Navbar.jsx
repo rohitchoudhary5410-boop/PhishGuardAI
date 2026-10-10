@@ -13,6 +13,7 @@ import './Navbar.css';
 const NAV_LINKS = [
   { to: '/', label: 'Home', primary: true },
   { to: '/scanner', label: 'Scanner', primary: true },
+  { to: '/device-scanner', label: 'Device Scanner', primary: true },
   { to: '/email-scanner', label: 'Gmail Shield', primary: true },
   { to: '/dashboard', label: 'Dashboard', primary: true },
   { to: '/bulk-scanner', label: 'Bulk Scanner', primary: false },

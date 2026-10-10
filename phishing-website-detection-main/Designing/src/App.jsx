@@ -19,11 +19,13 @@ import BulkScanner from './pages/BulkScanner/BulkScanner';
 import History from './pages/History/History';
 import Settings from './pages/Settings/Settings';
 import EmailScanner from './pages/EmailScanner/EmailScanner';
+import DeviceScanner from './pages/DeviceScanner/DeviceScanner';
 
 // Routes that render inside DashboardLayout, and therefore hide the marketing
 // footer. Derived from one list so the shell and the router can't drift apart.
 const DASHBOARD_ROUTES = [
   '/dashboard',
+  '/device-scanner',
   '/analytics',
   '/model-insights',
   '/email-scanner',
@@ -64,6 +66,7 @@ const AppShell = () => {
             {/* Dashboard (with sidebar) */}
             <Route element={<DashboardLayout />}>
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/device-scanner" element={<DeviceScanner />} />
               <Route path="/email-scanner" element={<EmailScanner />} />
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/model-insights" element={<ModelInsights />} />

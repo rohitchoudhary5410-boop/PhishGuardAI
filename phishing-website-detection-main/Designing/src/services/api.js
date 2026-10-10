@@ -325,4 +325,199 @@ export const getEmailHistory = async () => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Security Platform, File Scanner & Scam Message Endpoints
+// ---------------------------------------------------------------------------
+
+/**
+ * Get real background protection status and engine metrics
+ */
+export const getSecurityStatus = async () => {
+  if (IS_MOCK) {
+    return {
+      status: 'ACTIVE',
+      is_active: true,
+      uptime_seconds: 3600,
+      last_check: new Date().toISOString(),
+      total_scans: 142,
+      threats_blocked: 38,
+      clean_items: 104,
+      false_positives: 2,
+      protection_mode: 'Hybrid (Web Dashboard + Local Heuristics)',
+    };
+  }
+  try {
+    const response = await apiClient.get('/api/security/status');
+    return response.data;
+  } catch (error) {
+    throw describeError(error, 'Could not fetch security status.');
+  }
+};
+
+/**
+ * Start or resume background monitoring
+ */
+export const startProtection = async () => {
+  if (IS_MOCK) return { status: 'ACTIVE', message: 'Protection started (Mock)' };
+  try {
+    const response = await apiClient.post('/api/security/start');
+    return response.data;
+  } catch (error) {
+    throw describeError(error, 'Could not start protection.');
+  }
+};
+
+/**
+ * Pause background monitoring
+ */
+export const pauseProtection = async () => {
+  if (IS_MOCK) return { status: 'PAUSED', message: 'Protection paused (Mock)' };
+  try {
+    const response = await apiClient.post('/api/security/pause');
+    return response.data;
+  } catch (error) {
+    throw describeError(error, 'Could not pause protection.');
+  }
+};
+
+/**
+ * Stop background monitoring
+ */
+export const stopProtection = async () => {
+  if (IS_MOCK) return { status: 'STOPPED', message: 'Protection stopped (Mock)' };
+  try {
+    const response = await apiClient.post('/api/security/stop');
+    return response.data;
+  } catch (error) {
+    throw describeError(error, 'Could not stop protection.');
+  }
+};
+
+/**
+ * Scan a user-selected file without execution
+ */
+export const scanFile = async (fileObj) => {
+  if (IS_MOCK) {
+    await delay(1500);
+    const isEicar = fileObj.name?.toLowerCase().includes('eicar');
+    const isSuspicious = fileObj.name?.endsWith('.exe') || fileObj.name?.endsWith('.scr');
+    return {
+      filename: fileObj.name,
+      file_size_bytes: fileObj.size,
+      formatted_size: `${(fileObj.size / 1024).toFixed(1)} KB`,
+      sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      detected_type: isSuspicious ? 'PE Executable (Windows)' : 'PDF / Document File',
+      file_category: isSuspicious ? 'executable' : 'document',
+      verdict: isEicar ? 'Malicious' : isSuspicious ? 'Suspicious' : 'Clean',
+      threat_category: isEicar ? 'EICAR Test Signature' : isSuspicious ? 'Executable Payload' : 'Clean File',
+      risk_score: isEicar ? 95 : isSuspicious ? 70 : 5,
+      reasons: isEicar
+        ? ['Matches standard antivirus test signature.']
+        : isSuspicious
+        ? ['File contains executable binary code.']
+        : ['File structure matches declared extension and contains no malicious macros.'],
+      recommendations: isEicar || isSuspicious
+        ? ['Do not run this file on your operating system.', 'Delete or isolate immediately.']
+        : ['File appears clean and safe to use.'],
+      privacy_notice: 'Processed in-memory. No file was stored.',
+      timestamp: new Date().toISOString(),
+      scan_id: `file_mock_${Date.now()}`
+    };
+  }
+
+  try {
+    const formData = new FormData();
+    formData.append('file', fileObj);
+    const response = await apiClient.post('/api/scan/file', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30000,
+    });
+    return response.data;
+  } catch (error) {
+    throw describeError(error, 'File inspection failed.');
+  }
+};
+
+/**
+ * Analyze a suspicious SMS, chat message, or payment alert
+ */
+export const scanMessage = async (messageText) => {
+  if (IS_MOCK) {
+    await delay(1200);
+    const isUrgent = /urgent|suspended|blocked|immediate|kyc/i.test(messageText);
+    const isOtp = /otp|pin|password|cvv/i.test(messageText);
+    const risk = isUrgent && isOtp ? 90 : isUrgent || isOtp ? 65 : 15;
+    return {
+      verdict: risk >= 65 ? 'High Risk Scam' : risk >= 35 ? 'Suspicious Message' : 'Low Risk / Clean',
+      threat_category: isOtp ? 'Credential & OTP Harvesting' : isUrgent ? 'Urgent Coercion & Fraud' : 'No Scam Detected',
+      risk_score: risk,
+      indicators: [
+        { category: 'Social Engineering Pattern', matches: ['urgent action required'] }
+      ],
+      reasons: risk >= 35
+        ? ['Contains coercive urgency phrases and requests for sensitive actions.']
+        : ['No coercive phishing or fraud keywords found.'],
+      safe_actions: [
+        'Do NOT share 2FA OTP codes or banking PINs.',
+        'Never call phone numbers embedded in unverified SMS.'
+      ],
+      message_snippet: messageText.slice(0, 100) + '...',
+      timestamp: new Date().toISOString(),
+      scan_id: `msg_mock_${Date.now()}`
+    };
+  }
+
+  try {
+    const response = await apiClient.post('/api/scan/message', { message: messageText });
+    return response.data;
+  } catch (error) {
+    throw describeError(error, 'Message analysis failed.');
+  }
+};
+
+/**
+ * Unified scan history across all vectors (URLs, Files, Messages, Emails)
+ */
+export const getUnifiedScanHistory = async (type = 'all', limit = 50) => {
+  if (IS_MOCK) {
+    const { mockScanHistory } = await import('../data/mockData');
+    return mockScanHistory.map((item) => ({
+      id: item.scan_id || `scan_${Date.now()}`,
+      type: 'url',
+      target: item.url,
+      verdict: item.prediction,
+      risk_score: item.risk_score || (item.prediction === 'Phishing' ? 88 : 12),
+      threat_category: item.prediction === 'Phishing' ? 'Phishing URL' : 'Clean Website',
+      timestamp: item.scan_time || new Date().toISOString(),
+    }));
+  }
+
+  try {
+    const response = await apiClient.get('/api/scan/history', {
+      params: { type, limit }
+    });
+    return response.data;
+  } catch (error) {
+    throw describeError(error, 'Could not load unified scan history.');
+  }
+};
+
+/**
+ * Report a false positive
+ */
+export const reportFalsePositive = async (scanId, feedback = '', userVerdict = 'Safe') => {
+  if (IS_MOCK) return { status: 'recorded', report_id: `fp_${Date.now()}` };
+  try {
+    const response = await apiClient.post('/api/security/false-positive', {
+      scan_id: scanId,
+      feedback,
+      user_verdict: userVerdict,
+    });
+    return response.data;
+  } catch (error) {
+    throw describeError(error, 'Could not submit false positive report.');
+  }
+};
+
 export default apiClient;
+

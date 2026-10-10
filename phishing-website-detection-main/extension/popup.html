@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PhishGuard Shield</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 320px;
+      padding: 1.25rem;
+      background: #11141e;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid #1e293b;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 700;
+      font-size: 1rem;
+    }
+    .shield-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+    }
+    .shield-dot.disabled {
+      background: #ef4444;
+      box-shadow: 0 0 8px #ef4444;
+    }
+    .status-card {
+      background: #1a2030;
+      border: 1px solid #293548;
+      border-radius: 10px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+    .status-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+    }
+    .status-sub {
+      font-size: 0.8rem;
+      color: #94a3b8;
+    }
+    .stats-row {
+      display: flex;
+      justify-content: space-around;
+      margin: 1rem 0;
+      padding: 0.75rem 0;
+      background: #151a27;
+      border-radius: 8px;
+    }
+    .stat-item {
+      text-align: center;
+    }
+    .stat-val {
+      font-size: 1.25rem;
+      font-weight: 800;
+      color: #38bdf8;
+    }
+    .stat-lbl {
+      font-size: 0.7rem;
+      color: #64748b;
+      text-transform: uppercase;
+    }
+    .toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+      font-size: 0.9rem;
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #334155; transition: .3s; border-radius: 24px;
+    }
+    .slider:before {
+      position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px;
+      background-color: white; transition: .3s; border-radius: 50%;
+    }
+    input:checked + .slider { background-color: #10b981; }
+    input:checked + .slider:before { transform: translateX(20px); }
+    .btn-dashboard {
+      display: block;
+      width: 100%;
+      text-align: center;
+      padding: 0.65rem;
+      background: #2563eb;
+      color: white;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.85rem;
+      border-radius: 8px;
+      transition: background 0.2s;
+    }
+    .btn-dashboard:hover { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="brand">
+      <div class="shield-dot" id="shieldDot"></div>
+      <span>PhishGuard AI</span>
+    </div>
+    <span style="font-size: 0.75rem; color: #64748b;">v1.0.0</span>
+  </div>
+
+  <div class="status-card">
+    <div class="status-title" id="statusTitle">Protection Active</div>
+    <div class="status-sub" id="statusSub">Monitoring active tab navigation</div>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-item">
+      <div class="stat-val" id="scannedNum">0</div>
+      <div class="stat-lbl">URLs Checked</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-val" id="blockedNum" style="color: #f87171;">0</div>
+      <div class="stat-lbl">Threats Blocked</div>
+    </div>
+  </div>
+
+  <div class="toggle-row">
+    <span>Web Protection Guard</span>
+    <label class="switch">
+      <input type="checkbox" id="guardToggle" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <a href="http://localhost:5173/dashboard" target="_blank" class="btn-dashboard">
+    Open Full Dashboard
+  </a>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Security Warning — PhishGuard AI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f111a;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .warning-box {
+      background: #171a26;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      border-radius: 16px;
+      max-width: 640px;
+      width: 100%;
+      padding: 2.5rem;
+      box-shadow: 0 25px 50px -12px rgba(239, 68, 68, 0.25);
+    }
+    .icon-bar {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .shield-icon {
+      width: 56px;
+      height: 56px;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+    }
+    h1 {
+      font-size: 1.6rem;
+      color: #f87171;
+      font-weight: 800;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+      font-weight: 700;
+      font-size: 0.8rem;
+      margin-top: 0.25rem;
+    }
+    p {
+      color: #94a3b8;
+      font-size: 1rem;
+      line-height: 1.6;
+      margin-bottom: 1.25rem;
+    }
+    .threat-details {
+      background: #202434;
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.75rem;
+      font-size: 0.9rem;
+    }
+    .threat-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+    }
+    .threat-row:last-child { margin-bottom: 0; }
+    .label { color: #64748b; font-weight: 500; }
+    .val { color: #f1f5f9; font-weight: 600; word-break: break-all; }
+    .actions {
+      display: flex;
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    .btn {
+      flex: 1;
+      padding: 0.85rem 1.25rem;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      text-align: center;
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-safety {
+      background: #10b981;
+      color: #fff;
+    }
+    .btn-safety:hover { background: #059669; }
+    .btn-override {
+      background: transparent;
+      border: 1px solid #334155;
+      color: #94a3b8;
+    }
+    .btn-override:hover {
+      background: #202434;
+      color: #f87171;
+    }
+  </style>
+</head>
+<body>
+  <div class="warning-box">
+    <div class="icon-bar">
+      <div class="shield-icon">🛡️</div>
+      <div>
+        <h1>Dangerous Site Blocked</h1>
+        <span class="badge" id="riskBadge">HIGH RISK THREAT</span>
+      </div>
+    </div>
+
+    <p>
+      PhishGuard AI has prevented your browser from connecting to this website. The site has been identified as a fraudulent portal designed to steal personal or financial information.
+    </p>
+
+    <div class="threat-details">
+      <div class="threat-row">
+        <span class="label">Blocked Target:</span>
+        <span class="val" id="targetUrl">...</span>
+      </div>
+      <div class="threat-row">
+        <span class="label">Threat Category:</span>
+        <span class="val" id="threatCategory">Brand Impersonation Phishing</span>
+      </div>
+      <div class="threat-row">
+        <span class="label">Detection Evidence:</span>
+        <span class="val" id="detectionReason">Flagged by PhishGuard ML Engine</span>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-safety" id="backBtn">Return to Safety (Recommended)</button>
+      <button class="btn btn-override" id="proceedBtn">Proceed Anyway (Unsafe)</button>
+    </div>
+  </div>
+
+  <script src="warning.js"></script>
+</body>
+</html>

@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Search,
   Mail,
+  ShieldCheck,
   BarChart2,
   BrainCircuit,
   History,
@@ -19,6 +20,7 @@ const SECTIONS = [
     links: [
       { to: '/dashboard', label: 'Overview', icon: LayoutDashboard },
       { to: '/scanner', label: 'URL Scanner', icon: Search },
+      { to: '/device-scanner', label: 'Device Scanner', icon: ShieldCheck },
       { to: '/email-scanner', label: 'Gmail Shield', icon: Mail },
       { to: '/bulk-scanner', label: 'Bulk Scanner', icon: Upload },
     ],

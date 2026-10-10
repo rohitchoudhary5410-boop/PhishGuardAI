@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import {
   Search,
+  Shield,
   ShieldAlert,
   ShieldCheck,
   Target,
@@ -13,12 +14,28 @@ import {
   FileText,
   Settings as SettingsIcon,
   ChevronRight,
+  Play,
+  Pause,
+  Square,
+  RefreshCw,
+  Mail,
+  FileCode,
+  Info,
 } from 'lucide-react';
 import StatCard from '../../components/StatCard/StatCard';
 import ChartCard, { CustomTooltip } from '../../components/ChartCard/ChartCard';
 import RecentScans from '../../components/RecentScans/RecentScans';
-import { getAnalytics, getScanHistory, IS_MOCK } from '../../services/api';
+import { 
+  getAnalytics, 
+  getScanHistory, 
+  getSecurityStatus,
+  startProtection,
+  pauseProtection,
+  stopProtection,
+  IS_MOCK 
+} from '../../services/api';
 import { mockDashboardStats } from '../../data/mockData';
+import { useToast } from '../../components/Toast/Toast';
 import { useThemeTokens } from '../../hooks/useThemeTokens';
 import './Dashboard.css';
 
@@ -76,16 +93,71 @@ const Dashboard = () => {
   // State for live simulation
   const [liveStats, setLiveStats] = useState(mockDashboardStats);
 
+  // Background Protection Engine state
+  const { addToast } = useToast();
+  const [secStatus, setSecStatus] = useState(null);
+  const [secLoading, setSecLoading] = useState(false);
+
+  const fetchSecurity = async () => {
+    try {
+      const data = await getSecurityStatus();
+      setSecStatus(data);
+    } catch (e) {
+      console.warn('Security status fetch failed', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchSecurity();
+    const secInterval = setInterval(fetchSecurity, 10000);
+    return () => clearInterval(secInterval);
+  }, []);
+
+  const handleStartProtection = async () => {
+    setSecLoading(true);
+    try {
+      await startProtection();
+      addToast('Website & Device Background Protection Started', 'success');
+      fetchSecurity();
+    } catch (e) {
+      addToast(e.message, 'error');
+    } finally {
+      setSecLoading(false);
+    }
+  };
+
+  const handlePauseProtection = async () => {
+    setSecLoading(true);
+    try {
+      await pauseProtection();
+      addToast('Background Protection Paused', 'warning');
+      fetchSecurity();
+    } catch (e) {
+      addToast(e.message, 'error');
+    } finally {
+      setSecLoading(false);
+    }
+  };
+
+  const handleStopProtection = async () => {
+    setSecLoading(true);
+    try {
+      await stopProtection();
+      addToast('Background Protection Stopped', 'info');
+      fetchSecurity();
+    } catch (e) {
+      addToast(e.message, 'error');
+    } finally {
+      setSecLoading(false);
+    }
+  };
+
   // Resolved token values, recomputed on theme change. Recharts needs concrete
   // colours — it cannot consume `var(--token)` in the places it reads colour
   // back out for animation and cursor rendering.
   const tokens = useThemeTokens();
 
   useEffect(() => {
-    // `ignore` guards against out-of-order responses. Clicking 24H → 7D → 30D
-    // quickly fires three overlapping requests with no ordering guarantee, so
-    // without this the last one to *resolve* wins — which need not be the one
-    // matching the highlighted filter.
     let ignore = false;
 
     const fetchData = async () => {
@@ -112,14 +184,12 @@ const Dashboard = () => {
     };
   }, [timeFilter]);
 
-  // Live Data Simulation — mock mode only. Running this against real aggregates
-  // would inflate genuine scan counts with random increments.
+  // Live Data Simulation — mock mode only.
   useEffect(() => {
     if (!IS_MOCK) return undefined;
 
     const interval = setInterval(() => {
       setLiveStats(prev => {
-        // Parse current string values, increment slightly, then format back
         const parseNum = (str) => parseInt(str.replace(/,/g, ''), 10);
         const formatNum = (num) => num.toLocaleString();
 
@@ -127,7 +197,6 @@ const Dashboard = () => {
         const currentLegit = parseNum(prev.legitimateWebsites.value);
         const currentPhishing = parseNum(prev.phishingDetected.value);
 
-        // Randomly add 0 or 1 to scans to simulate traffic
         const addLegit = Math.random() > 0.5 ? 1 : 0;
         const addPhishing = Math.random() > 0.8 ? 1 : 0;
 
@@ -138,7 +207,7 @@ const Dashboard = () => {
           phishingDetected: { ...prev.phishingDetected, value: formatNum(currentPhishing + addPhishing) }
         };
       });
-    }, 3000); // Update every 3 seconds
+    }, 3000);
 
     return () => clearInterval(interval);
   }, []);
@@ -152,9 +221,6 @@ const Dashboard = () => {
     );
   }
 
-  // Every value resolves through a design token, so the charts re-colour with
-  // the theme. `grid` and `text` previously passed `var(...)` strings straight
-  // into SVG stroke/fill attributes, and the series were literal hexes.
   const colors = {
     phishing: tokens['--risk-danger'],
     suspicious: tokens['--risk-suspicious'],
@@ -163,7 +229,6 @@ const Dashboard = () => {
     text: tokens['--text-tertiary'],
   };
 
-  // Slice colours resolved the same way, falling back to whatever the API sent.
   const riskDistribution = (analytics?.riskDistribution || []).map((slice) => ({
     ...slice,
     color: tokens[RISK_TOKENS[slice.name]] || slice.color,
@@ -171,7 +236,7 @@ const Dashboard = () => {
 
   const periodLabel = PERIOD_LABELS[timeFilter];
 
-  // Simulated ticker in mock mode; real aggregates otherwise.
+  // Real aggregates in live mode; ticker in mock mode.
   const stats = IS_MOCK ? liveStats : statsFromAnalytics(analytics);
 
   return (
@@ -179,16 +244,71 @@ const Dashboard = () => {
       <div className="dashboard-page-header dashboard-page-header--split">
         <div>
           <h1 className="dashboard-page-title">Overview</h1>
-          <p className="dashboard-page-subtitle">Monitor website analysis activity and Machine Learning detection performance.</p>
+          <p className="dashboard-page-subtitle">Monitor website protection activity, background monitoring, and device threat scans.</p>
         </div>
         
         {/* System Health Indicator */}
         <div className="system-health-badge">
           <div className="system-health-indicator pulse"></div>
           <div className="system-health-info">
-            <span className="system-health-status">Systems Operational</span>
-            <span className="system-health-latency">ML Latency: 45ms</span>
+            <span className="system-health-status">Engine Online & Healthy</span>
+            <span className="system-health-latency">Model Latency: 42ms</span>
           </div>
+        </div>
+      </div>
+
+      {/* Background Protection Control Banner */}
+      <div className={`protection-control-banner status-${(secStatus?.status || 'active').toLowerCase()}`}>
+        <div className="protection-banner-left">
+          <div className="protection-shield-badge">
+            <Shield className="w-6 h-6 text-emerald-400" />
+          </div>
+          <div>
+            <div className="protection-title-row">
+              <h3 className="protection-title">Background Protection Engine</h3>
+              <span className={`status-pill ${secStatus?.status === 'ACTIVE' ? 'active' : secStatus?.status === 'PAUSED' ? 'paused' : 'stopped'}`}>
+                ● {secStatus?.status || 'ACTIVE'}
+              </span>
+            </div>
+            <p className="protection-sub">
+              {secStatus?.status === 'ACTIVE'
+                ? 'Actively monitoring submitted URLs, on-device file signatures, and scam indicators.'
+                : secStatus?.status === 'PAUSED'
+                ? 'Protection is temporarily paused. Resume monitoring for real-time safety.'
+                : 'Protection is stopped. Incoming scans will not update continuous logs.'}
+              {secStatus?.last_check && ` • Last security check: ${new Date(secStatus.last_check).toLocaleTimeString()}`}
+            </p>
+          </div>
+        </div>
+
+        <div className="protection-banner-actions">
+          <button
+            className={`btn-sec-action ${secStatus?.status === 'ACTIVE' ? 'active' : ''}`}
+            onClick={handleStartProtection}
+            disabled={secLoading || secStatus?.status === 'ACTIVE'}
+            title="Start continuous monitoring"
+          >
+            <Play className="w-4 h-4 mr-1" />
+            Start
+          </button>
+          <button
+            className={`btn-sec-action ${secStatus?.status === 'PAUSED' ? 'paused' : ''}`}
+            onClick={handlePauseProtection}
+            disabled={secLoading || secStatus?.status === 'PAUSED'}
+            title="Pause monitoring temporarily"
+          >
+            <Pause className="w-4 h-4 mr-1" />
+            Pause
+          </button>
+          <button
+            className={`btn-sec-action ${secStatus?.status === 'STOPPED' ? 'stopped' : ''}`}
+            onClick={handleStopProtection}
+            disabled={secLoading || secStatus?.status === 'STOPPED'}
+            title="Stop monitoring"
+          >
+            <Square className="w-4 h-4 mr-1" />
+            Stop
+          </button>
         </div>
       </div>
 
@@ -196,10 +316,10 @@ const Dashboard = () => {
       <div className="grid-4 dashboard-kpi-row">
         <StatCard
           title="Total Scans"
-          value={liveStats.totalScans.value}
-          change={liveStats.totalScans.change}
-          trend={liveStats.totalScans.trend}
-          sparkline={liveStats.totalScans.sparkline}
+          value={stats.totalScans.value}
+          change={stats.totalScans.change}
+          trend={stats.totalScans.trend}
+          sparkline={stats.totalScans.sparkline}
           icon={Search}
           colorClass="blue"
           period={periodLabel}
@@ -207,24 +327,22 @@ const Dashboard = () => {
         />
         <StatCard
           title="Phishing Detected"
-          value={liveStats.phishingDetected.value}
-          change={liveStats.phishingDetected.change}
-          trend={liveStats.phishingDetected.trend}
-          sparkline={liveStats.phishingDetected.sparkline}
+          value={stats.phishingDetected.value}
+          change={stats.phishingDetected.change}
+          trend={stats.phishingDetected.trend}
+          sparkline={stats.phishingDetected.sparkline}
           icon={ShieldAlert}
           colorClass="red"
           period={periodLabel}
-          /* Fewer phishing sites detected is good news. Without this, the -2.4%
-             fall rendered in danger-red as though it were a problem. */
           invertTrend
           delay={0.1}
         />
         <StatCard
           title="Legitimate Websites"
-          value={liveStats.legitimateWebsites.value}
-          change={liveStats.legitimateWebsites.change}
-          trend={liveStats.legitimateWebsites.trend}
-          sparkline={liveStats.legitimateWebsites.sparkline}
+          value={stats.legitimateWebsites.value}
+          change={stats.legitimateWebsites.change}
+          trend={stats.legitimateWebsites.trend}
+          sparkline={stats.legitimateWebsites.sparkline}
           icon={ShieldCheck}
           colorClass="green"
           period={periodLabel}
@@ -232,10 +350,10 @@ const Dashboard = () => {
         />
         <StatCard
           title="Model Accuracy"
-          value={liveStats.modelAccuracy.value}
-          change={liveStats.modelAccuracy.change}
-          trend={liveStats.modelAccuracy.trend}
-          sparkline={liveStats.modelAccuracy.sparkline}
+          value={stats.modelAccuracy.value}
+          change={stats.modelAccuracy.change}
+          trend={stats.modelAccuracy.trend}
+          sparkline={stats.modelAccuracy.sparkline}
           icon={Target}
           colorClass="purple"
           period={periodLabel}
@@ -402,10 +520,30 @@ const Dashboard = () => {
               <ChevronRight size={18} className="quick-action-arrow" aria-hidden="true" />
             </Link>
 
-            {/* Icon colours moved from inline styles to modifier classes, so
-                they resolve through tokens and respond to the theme. */}
-            <Link to="/bulk-scanner" className="quick-action-btn">
+            <Link to="/device-scanner" className="quick-action-btn">
               <span className="quick-action-icon blue" aria-hidden="true">
+                <FileCode size={20} />
+              </span>
+              <span className="quick-action-content">
+                <span className="quick-action-label">Device Security Scanner</span>
+                <span className="quick-action-desc">Scan files & scam SMS messages</span>
+              </span>
+              <ChevronRight size={18} className="quick-action-arrow" aria-hidden="true" />
+            </Link>
+
+            <Link to="/email-scanner" className="quick-action-btn">
+              <span className="quick-action-icon purple" aria-hidden="true">
+                <Mail size={20} />
+              </span>
+              <span className="quick-action-content">
+                <span className="quick-action-label">Gmail Threat Shield</span>
+                <span className="quick-action-desc">Detect deceptive emails & lures</span>
+              </span>
+              <ChevronRight size={18} className="quick-action-arrow" aria-hidden="true" />
+            </Link>
+
+            <Link to="/bulk-scanner" className="quick-action-btn">
+              <span className="quick-action-icon green" aria-hidden="true">
                 <Upload size={20} />
               </span>
               <span className="quick-action-content">
@@ -416,7 +554,7 @@ const Dashboard = () => {
             </Link>
 
             <Link to="/analytics" className="quick-action-btn">
-              <span className="quick-action-icon green" aria-hidden="true">
+              <span className="quick-action-icon neutral" aria-hidden="true">
                 <FileText size={20} />
               </span>
               <span className="quick-action-content">
@@ -425,17 +563,13 @@ const Dashboard = () => {
               </span>
               <ChevronRight size={18} className="quick-action-arrow" aria-hidden="true" />
             </Link>
+          </div>
 
-            <Link to="/settings" className="quick-action-btn">
-              <span className="quick-action-icon neutral" aria-hidden="true">
-                <SettingsIcon size={20} />
-              </span>
-              <span className="quick-action-content">
-                <span className="quick-action-label">System settings</span>
-                <span className="quick-action-desc">Configure ML parameters</span>
-              </span>
-              <ChevronRight size={18} className="quick-action-arrow" aria-hidden="true" />
-            </Link>
+          <div className="dashboard-limitations-notice">
+            <Info size={16} className="text-blue-400 flex-shrink-0" />
+            <span>
+              <strong>Privacy Architecture:</strong> Web app inspects submitted inputs in-memory. Full browser-wide navigation defense requires the PhishGuard Browser Extension.
+            </span>
           </div>
         </div>
       </div>

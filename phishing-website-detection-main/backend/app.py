@@ -37,6 +37,7 @@ from flask_cors import CORS
 
 from features import DEGENERATE_FEATURES, FEATURE_ORDER, TRAINING_CLIP_BOUNDS, extract_features
 import email_scanner
+import security_service
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -231,6 +232,16 @@ def score_url(url: str, overrides: dict | None = None, with_network: bool = True
 
 
 def _record(result: dict) -> None:
+    is_threat = result.get("prediction") in ("Phishing", "Suspicious")
+    security_service.protection_manager.record_scan(is_threat=is_threat)
+    security_service.unified_history.add(
+        item_type="url",
+        target=result.get("url", ""),
+        verdict=result.get("prediction", "Unknown"),
+        risk_score=result.get("risk_score", 0),
+        threat_category="Phishing URL" if is_threat else "Legitimate URL",
+        details=result
+    )
     with _history_lock:
         _history.appendleft(
             {
@@ -249,6 +260,7 @@ def _record(result: dict) -> None:
                 "degenerate_features": result.get("degenerate_features", []),
             }
         )
+
 
 
 # ---------------------------------------------------------------------------
@@ -789,6 +801,200 @@ def gmail_sync():
         "total_scanned": len(scanned_emails),
         "results": scanned_emails
     })
+
+
+# ---------------------------------------------------------------------------
+# Security Dashboard & Threat Platform API Routes
+# ---------------------------------------------------------------------------
+
+@app.get("/api/security/status")
+@app.get("/security/status")
+def security_status():
+    """Returns real protection engine state, metrics, uptime, and capabilities."""
+    return jsonify(security_service.protection_manager.get_status())
+
+
+@app.post("/api/security/start")
+@app.post("/security/start")
+def security_start():
+    return jsonify(security_service.protection_manager.start())
+
+
+@app.post("/api/security/pause")
+@app.post("/security/pause")
+def security_pause():
+    return jsonify(security_service.protection_manager.pause())
+
+
+@app.post("/api/security/stop")
+@app.post("/security/stop")
+def security_stop():
+    return jsonify(security_service.protection_manager.stop())
+
+
+@app.post("/api/security/false-positive")
+def security_false_positive():
+    payload = request.get_json(silent=True) or {}
+    scan_id = str(payload.get("scan_id", ""))
+    feedback = str(payload.get("feedback", "User marked false positive"))
+    user_verdict = str(payload.get("user_verdict", "Safe"))
+    record = security_service.unified_history.record_false_positive(scan_id, feedback, user_verdict)
+    return jsonify({"status": "recorded", "report": record})
+
+
+@app.post("/api/scan/url")
+def api_scan_url():
+    """
+    Website Protection API:
+    Evaluates URL scheme, enforces SSRF protections, extracts lexical & domain heuristics,
+    runs the trained Random Forest model, and returns a verified threat verdict.
+    """
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"message": "A valid JSON object payload is required."}), 400
+    url = (payload.get("url") or "").strip()
+    if not url:
+        return jsonify({"message": "A 'url' parameter is required."}), 400
+
+    # 1. SSRF & Loopback Protection
+    is_safe, error_reason, hostname = security_service.validate_and_check_ssrf(url)
+    if not is_safe:
+        blocked_resp = {
+            "url": url,
+            "verdict": "Blocked",
+            "prediction": "Blocked",
+            "risk_score": 95,
+            "threat_category": "SSRF / Internal Resource Violation",
+            "detection_reasons": [error_reason],
+            "model_limitations": "Blocked at network gateway security layer prior to model execution.",
+            "recommended_action": "Do not attempt to scan internal infrastructure, loopback, or cloud metadata endpoints.",
+            "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "scan_id": f"scan_{uuid.uuid4().hex[:12]}",
+            "is_ssrf_blocked": True
+        }
+        security_service.protection_manager.record_scan(is_threat=True)
+        security_service.unified_history.add(
+            item_type="url",
+            target=url,
+            verdict="Blocked",
+            risk_score=95,
+            threat_category="SSRF / Forbidden Target",
+            details=blocked_resp
+        )
+        return jsonify(blocked_resp), 200
+
+    # 2. Heuristic signals
+    adv_signals = security_service.analyze_advanced_url_signals(url)
+
+    # 3. ML Model prediction
+    overrides = payload.get("features")
+    with_network = bool(payload.get("with_network", True))
+    try:
+        model_result = score_url(url, overrides=overrides, with_network=with_network)
+    except Exception as exc:
+        app.logger.exception("URL scoring failed")
+        return jsonify({"message": f"URL analysis failed: {exc}"}), 500
+
+    # 4. Synthesize composite risk and verdict
+    composite_risk = max(model_result["risk_score"], adv_signals["heuristic_score"])
+    reasons = []
+    if adv_signals["signals"]:
+        reasons.extend(adv_signals["signals"])
+
+    for f_name, f_data in model_result.get("features", {}).items():
+        if f_data.get("risk") == "high_risk" and len(reasons) < 5:
+            reasons.append(f_data.get("description", f"{f_name} is anomalous"))
+
+    if composite_risk >= 75:
+        verdict = "Phishing"
+        threat_cat = adv_signals["threat_category"] if adv_signals["threat_category"] != "General Analysis" else "Machine Learning Phishing Detection"
+        rec_action = "Do NOT visit or submit sensitive login, financial, or personal information on this site."
+    elif composite_risk >= 35:
+        verdict = "Suspicious"
+        threat_cat = adv_signals["threat_category"] if adv_signals["threat_category"] != "General Analysis" else "Suspicious Website"
+        rec_action = "Proceed with caution. Verify the domain through official trusted search results."
+    else:
+        verdict = "Safe"
+        threat_cat = "Legitimate Website"
+        rec_action = "Site displays standard legitimate domain and structural characteristics."
+        if not reasons:
+            reasons.append("Clean URL structure matching established legitimate web standards.")
+
+    model_result["verdict"] = verdict
+    model_result["risk_score"] = composite_risk
+    model_result["threat_category"] = threat_cat
+    model_result["detection_reasons"] = reasons
+    model_result["recommended_action"] = rec_action
+    model_result["timestamp"] = model_result["scan_time"]
+
+    _record(model_result)
+    return jsonify(model_result)
+
+
+@app.post("/api/scan/file")
+@app.post("/scan/file")
+def api_scan_file():
+    """
+    On-Device File Security Scanner:
+    Inspects user-selected file content, verifies magic byte signatures, computes SHA-256,
+    identifies disguised executables, queries malware hash fixtures, and safely inspects archives.
+    Temporary memory buffers are purged immediately after analysis. Zero native execution.
+    """
+    if "file" not in request.files:
+        return jsonify({"message": "No file part provided in request."}), 400
+    file = request.files["file"]
+    if not file or not file.filename:
+        return jsonify({"message": "No file selected."}), 400
+
+    file_bytes = file.read()
+    filename = file.filename
+
+    result = security_service.scan_file_buffer(file_bytes, filename)
+    security_service.unified_history.add(
+        item_type="file",
+        target=filename,
+        verdict=result["verdict"],
+        risk_score=result["risk_score"],
+        threat_category=result["threat_category"],
+        details=result
+    )
+    return jsonify(result)
+
+
+@app.post("/api/scan/message")
+@app.post("/scan/message")
+def api_scan_message():
+    """
+    Scam Message and Payment-Link Analyzer:
+    Detects financial lures, fake bank alerts, OTP harvesting, urgency threats,
+    and scans embedded URLs with the machine learning URL model.
+    """
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"message": "A valid JSON object payload is required."}), 400
+    msg = (payload.get("message") or "").strip()
+    if not msg:
+        return jsonify({"message": "Please provide 'message' text to evaluate."}), 400
+
+    result = security_service.analyze_scam_message(msg, score_url_fn=_score_url_for_email)
+    security_service.unified_history.add(
+        item_type="message",
+        target=result.get("message_snippet", msg[:60]),
+        verdict=result["verdict"],
+        risk_score=result["risk_score"],
+        threat_category=result["threat_category"],
+        details=result
+    )
+    return jsonify(result)
+
+
+@app.get("/api/scan/history")
+def api_scan_history():
+    """Returns unified scan history across URLs, files, messages, and emails."""
+    item_type = request.args.get("type", "all")
+    limit = int(request.args.get("limit", 50))
+    return jsonify(security_service.unified_history.list_all(item_type=item_type, limit=limit))
+
 
 
 if __name__ == "__main__":
