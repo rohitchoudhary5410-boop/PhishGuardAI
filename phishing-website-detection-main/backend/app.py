@@ -43,6 +43,7 @@ import numpy as np
 import pandas as pd
 from flask import Flask, jsonify, request, redirect, render_template
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
 
 from features import DEGENERATE_FEATURES, FEATURE_ORDER, TRAINING_CLIP_BOUNDS, extract_features
 import email_scanner
@@ -70,7 +71,28 @@ BULK_MAX_URLS = int(os.environ.get("BULK_MAX_URLS", 200))
 EXPLAIN_TOP_N = 8
 
 app = Flask(__name__)
-CORS(app)  # Vite dev server runs on a different origin.
+# Limit maximum payload size across all endpoints to 25MB to prevent memory exhaustion DoS
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
+
+# Restrict CORS to verified development frontends and explicitly permitted domains
+ALLOWED_ORIGINS = [
+    r"^http://localhost(:\d+)?$",
+    r"^http://127\.0\.0\.1(:\d+)?$",
+    r"^http://10\.\d+\.\d+\.\d+(:\d+)?$",
+    r"^http://192\.168\.\d+\.\d+(:\d+)?$",
+]
+custom_origins = os.environ.get("ALLOWED_ORIGINS")
+if custom_origins:
+    ALLOWED_ORIGINS.extend([o.strip() for o in custom_origins.split(",") if o.strip()])
+
+CORS(
+    app,
+    origins=ALLOWED_ORIGINS,
+    methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+    supports_credentials=False,
+    max_age=86400
+)
 
 # ---------------------------------------------------------------------------
 # Model loading
@@ -115,7 +137,7 @@ class RateLimiter:
     """Thread-safe in-memory sliding window rate limiter per client IP."""
 
     def __init__(self, limit_per_minute: int = 120):
-        self.limit = limit_per_minute
+        self.limit = int(os.environ.get("RATE_LIMIT_PER_MINUTE", limit_per_minute))
         self.requests: dict[str, list[float]] = {}
         self._lock = threading.Lock()
 
@@ -134,6 +156,25 @@ class RateLimiter:
 limiter = RateLimiter(limit_per_minute=120)
 
 
+@app.before_request
+def enforce_security_controls():
+    """Applies IP rate limiting and basic security validation on mutating requests."""
+    # Only rate limit data mutations and scanning requests (POST/PUT/DELETE)
+    if request.method in ("POST", "PUT", "DELETE"):
+        client_ip = (
+            request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or request.remote_addr
+            or "127.0.0.1"
+        )
+        if not limiter.is_allowed(client_ip):
+            resp = jsonify({
+                "message": "Rate limit exceeded (120 req/min). Please try again shortly.",
+                "status": 429
+            })
+            resp.headers["Retry-After"] = "60"
+            return resp, 429
+
+
 @app.after_request
 def add_security_headers(response):
     """Enforces strict browser security, anti-clickjacking, and zero-leakage headers."""
@@ -144,7 +185,9 @@ def add_security_headers(response):
         "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data: https: blob:; "
         "connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; "
-        "frame-ancestors 'self';"
+        "frame-ancestors 'self'; "
+        "base-uri 'self'; "
+        "form-action 'self';"
     )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -152,7 +195,24 @@ def add_security_headers(response):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=(), payment=()"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Server"] = "PhishGuard-AI"
     return response
+
+
+@app.errorhandler(413)
+def handle_payload_too_large(exc):
+    return jsonify({
+        "message": "Request entity too large. Maximum permitted payload is 25MB.",
+        "status": 413
+    }), 413
+
+
+@app.errorhandler(429)
+def handle_rate_limit_exceeded(exc):
+    return jsonify({
+        "message": "Rate limit exceeded (120 req/min). Please try again shortly.",
+        "status": 429
+    }), 429
 
 # ---------------------------------------------------------------------------
 # Presentation helpers
@@ -406,10 +466,6 @@ def health():
 
 @app.post("/predict")
 def predict():
-    client_ip = request.remote_addr or "127.0.0.1"
-    if not limiter.is_allowed(client_ip):
-        return jsonify({"message": "Rate limit exceeded (120 req/min). Please try again shortly."}), 429
-
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"message": "A valid JSON object payload is required."}), 400
@@ -811,8 +867,9 @@ def gmail_sync():
             )
             mode = "live_imap"
         except Exception as exc:
-            app.logger.warning("Gmail IMAP error: %s", exc)
-            return jsonify({"message": str(exc)}), 400
+            safe_msg = str(exc).replace(app_pwd, "********") if app_pwd else str(exc)
+            app.logger.warning("Gmail IMAP error: %s", safe_msg)
+            return jsonify({"message": safe_msg}), 400
 
     elif token:
         # 2. OAuth2 Sync
@@ -1036,17 +1093,21 @@ def api_scan_file():
     if not file or not file.filename:
         return jsonify({"message": "No file selected."}), 400
 
+    raw_filename = file.filename
+    safe_filename = secure_filename(os.path.basename(raw_filename)) or "uploaded_file.bin"
+
     try:
-        file_bytes = file.read()
-        filename = file.filename
-        result = security_service.scan_file_buffer(file_bytes, filename)
+        file_bytes = file.read(25 * 1024 * 1024 + 1)
+        if len(file_bytes) > 25 * 1024 * 1024:
+            return jsonify({"message": "File exceeds maximum permitted size of 25MB."}), 413
+        result = security_service.scan_file_buffer(file_bytes, safe_filename)
     except Exception as exc:
         app.logger.exception("File analysis failed")
         return jsonify({"message": f"File analysis failed: {exc}"}), 500
 
     security_service.unified_history.add(
         item_type="file",
-        target=filename,
+        target=safe_filename,
         verdict=result["verdict"],
         risk_score=result["risk_score"],
         threat_category=result["threat_category"],

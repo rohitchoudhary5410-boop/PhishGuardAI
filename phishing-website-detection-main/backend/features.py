@@ -509,9 +509,18 @@ def _http_features(url: str, timeout: float) -> dict[str, float]:
         return out
     try:
         started = time.perf_counter()
-        response = requests.get(url, timeout=timeout, allow_redirects=True)
-        out["time_response"] = round(time.perf_counter() - started, 6)
-        out["qty_redirects"] = len(response.history)
+        with requests.get(url, timeout=timeout, allow_redirects=False, stream=True) as response:
+            out["time_response"] = round(time.perf_counter() - started, 6)
+            redirect_count = 0
+            if response.is_redirect or response.status_code in (301, 302, 303, 307, 308):
+                loc = response.headers.get("Location", "")
+                if loc:
+                    parsed_loc = urlparse(loc if "://" in loc else f"http://{loc}")
+                    loc_host = (parsed_loc.hostname or "").lower()
+                    if loc_host and is_ssrf_risk(loc_host):
+                        return out
+                redirect_count = 1
+            out["qty_redirects"] = redirect_count
     except Exception:
         pass
     return out
