@@ -16,10 +16,10 @@ const NAV_LINKS = [
   { to: '/device-scanner', label: 'Device Scanner', primary: true },
   { to: '/email-scanner', label: 'Gmail Shield', primary: true },
   { to: '/dashboard', label: 'Dashboard', primary: true },
-  { to: '/bulk-scanner', label: 'Bulk Scanner', primary: false },
-  { to: '/analytics', label: 'Analytics', primary: true },
-  { to: '/model-insights', label: 'Model Insights', primary: true },
   { to: '/history', label: 'History', primary: true },
+  { to: '/analytics', label: 'Analytics', primary: false },
+  { to: '/model-insights', label: 'Model Insights', primary: false },
+  { to: '/bulk-scanner', label: 'Bulk Scanner', primary: false },
   { to: '/settings', label: 'Settings', primary: false },
 ];
 

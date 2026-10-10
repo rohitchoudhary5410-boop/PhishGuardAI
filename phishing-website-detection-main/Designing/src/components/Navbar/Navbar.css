@@ -22,7 +22,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-8);
+  gap: 1.25rem;
 }
 
 /* On dashboard routes the sidebar occupies the left edge, so a viewport-centred
@@ -84,19 +84,19 @@
 .navbar-nav {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  /* Allows the link row to shrink before it forces the bar to overflow. */
-  min-width: 0;
+  gap: 6px;
+  flex-shrink: 1;
   padding: 4px 0;
+  white-space: nowrap;
 }
 
 .nav-link {
   display: inline-flex;
   align-items: center;
-  padding: var(--space-2) var(--space-3);
+  padding: 6px 11px;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
-  font-size: var(--text-sm);
+  font-size: 13.5px;
   font-weight: var(--font-medium);
   transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
   text-decoration: none;
@@ -145,6 +145,8 @@
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 0.75rem;
 }
 
 .theme-toggle {
