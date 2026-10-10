@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: phishguard-backend
+    runtime: python
+    rootDir: phishing-website-detection-main/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: PYTHON_VERSION
+        value: 3.11.9
