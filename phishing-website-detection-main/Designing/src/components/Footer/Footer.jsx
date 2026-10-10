@@ -11,7 +11,7 @@ const Footer = () => {
             <Shield size={14} />
           </span>
           <span className="footer-text">
-            © {new Date().getFullYear()} PhishGuard AI. Developed by <span className="developer-name">Yash Gajera</span>. Built with Machine Learning.
+            © {new Date().getFullYear()} PhishGuard AI. Developed by <span className="developer-name">Infinity Coders</span>. Built with Machine Learning.
           </span>
         </div>
         <nav className="footer-links" aria-label="Footer">

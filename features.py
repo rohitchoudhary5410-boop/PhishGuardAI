@@ -354,6 +354,46 @@ def extract_lexical(raw_url: str) -> dict[str, float]:
 # lookup — so a dead domain still produces a scoreable vector.
 
 
+def is_ssrf_risk(host_or_ip: str | None) -> bool:
+    """
+    Prevents Server-Side Request Forgery (SSRF).
+    Returns True if host_or_ip is empty, localhost, loopback, private IP (RFC 1918),
+    link-local (e.g. AWS/cloud metadata 169.254.169.254), multicast, or reserved.
+    """
+    if not host_or_ip:
+        return True
+    host = host_or_ip.strip().lower()
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".local") or host.endswith(".internal"):
+        return True
+
+    try:
+        ip = ipaddress.ip_address(host)
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        )
+    except ValueError:
+        pass
+
+    try:
+        resolved = socket.gethostbyname(host)
+        ip = ipaddress.ip_address(resolved)
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        )
+    except Exception:
+        return False
+
+
 def _dns_features(domain: str, timeout: float) -> dict[str, float]:
     out = {
         "domain_spf": MISSING,
@@ -434,6 +474,8 @@ def _whois_features(domain: str) -> dict[str, float]:
 
 def _tls_feature(domain: str, timeout: float) -> float:
     """1 if a valid certificate chain is presented on 443, else 0."""
+    if not domain or is_ssrf_risk(domain):
+        return 0
     try:
         context = ssl.create_default_context()
         with socket.create_connection((domain, 443), timeout=timeout) as sock:
@@ -447,6 +489,10 @@ def _tls_feature(domain: str, timeout: float) -> float:
 
 def _http_features(url: str, timeout: float) -> dict[str, float]:
     out = {"time_response": MISSING, "qty_redirects": MISSING}
+    parts = split_url(url)
+    domain = parts.get("domain")
+    if not domain or is_ssrf_risk(domain):
+        return out
     try:
         import requests  # type: ignore
     except ImportError:
@@ -467,6 +513,8 @@ def _asn_feature(domain: str, timeout: float) -> float:
     (Team Cymru DNS, or a MaxMind database). Attempted via Cymru's DNS service
     when dnspython is available.
     """
+    if not domain or is_ssrf_risk(domain):
+        return MISSING
     try:
         import dns.resolver  # type: ignore
     except ImportError:
@@ -507,7 +555,7 @@ def extract_network(raw_url: str, timeout: float = 4.0) -> dict[str, float]:
         "url_google_index": MISSING,
         "domain_google_index": MISSING,
     }
-    if not domain:
+    if not domain or is_ssrf_risk(domain):
         return out
 
     out.update(_dns_features(domain, timeout))

@@ -32,7 +32,7 @@ from pathlib import Path
 
 import joblib
 import numpy as np
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, redirect, render_template
 from flask_cors import CORS
 
 from features import DEGENERATE_FEATURES, FEATURE_ORDER, TRAINING_CLIP_BOUNDS, extract_features
@@ -256,6 +256,38 @@ def _record(result: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+@app.get("/")
+def index():
+    """
+    Root route:
+    - If opened in a web browser, render the PhishGuard AI Backend Console & API Explorer.
+    - If requested by an API client requesting JSON, return the API status and endpoints.
+    """
+    accept = request.headers.get("Accept", "")
+    if "application/json" in accept and "text/html" not in accept:
+        return jsonify(
+            {
+                "status": "ok",
+                "service": "PhishGuard AI Backend API",
+                "version": "1.0.0",
+                "web_app_url": "http://localhost:5173",
+                "endpoints": {
+                    "health": "/health",
+                    "predict": "POST /predict",
+                    "bulk_scan": "POST /bulk-scan",
+                    "model_metrics": "/model-metrics",
+                    "history": "/history",
+                    "analytics": "/analytics",
+                    "email_scan": "POST /api/email/scan",
+                    "gmail_sync": "POST /api/email/gmail-sync",
+                    "email_history": "/api/email/history",
+                },
+            }
+        )
+
+    return render_template("backend_console.html")
+
+
 @app.get("/health")
 def health():
     return jsonify(
@@ -277,17 +309,33 @@ def health():
 
 @app.post("/predict")
 def predict():
-    payload = request.get_json(silent=True) or {}
-    url = (payload.get("url") or "").strip()
-    if not url:
-        return jsonify({"message": "A 'url' field is required."}), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"message": "A valid JSON object payload is required."}), 400
 
-    # Any key matching a real feature name is accepted as an override; anything
-    # else (e.g. the UI's invented 'url_entropy') is reported back rather than
-    # silently ignored.
-    raw_overrides = payload.get("features") or {}
-    overrides = {k: v for k, v in raw_overrides.items() if k in FEATURE_ORDER}
-    rejected = sorted(set(raw_overrides) - set(overrides))
+    raw_url = payload.get("url")
+    if not isinstance(raw_url, str) or not raw_url.strip():
+        return jsonify({"message": "A 'url' string is required."}), 400
+
+    url = raw_url.strip()
+    if len(url) > 2048:
+        return jsonify({"message": "URL exceeds maximum permitted length of 2048 characters."}), 400
+
+    raw_overrides = payload.get("features")
+    if raw_overrides is not None and not isinstance(raw_overrides, dict):
+        return jsonify({"message": "'features' field must be an object/dict of feature overrides."}), 400
+
+    overrides = {}
+    if isinstance(raw_overrides, dict):
+        for k, v in raw_overrides.items():
+            if k in FEATURE_ORDER:
+                try:
+                    overrides[k] = float(v)
+                except (ValueError, TypeError):
+                    pass
+        rejected = sorted(set(raw_overrides) - set(overrides))
+    else:
+        rejected = []
 
     try:
         result = score_url(url, overrides=overrides)
@@ -303,10 +351,76 @@ def predict():
 
 @app.post("/bulk-scan")
 def bulk_scan():
-    payload = request.get_json(silent=True) or {}
-    urls = payload.get("urls") or []
-    if not isinstance(urls, list) or not urls:
-        return jsonify({"message": "A non-empty 'urls' array is required."}), 400
+    urls = []
+
+    # 1. File Upload (multipart/form-data)
+    if request.files and "file" in request.files:
+        uploaded_file = request.files["file"]
+        if not uploaded_file or not uploaded_file.filename:
+            return jsonify({"message": "No file selected for upload."}), 400
+
+        filename = uploaded_file.filename.lower()
+        if not (filename.endswith(".csv") or filename.endswith(".txt")):
+            return jsonify({"message": "Unsupported file type. Only .csv and .txt files are allowed."}), 400
+
+        content = uploaded_file.read()
+        if len(content) == 0:
+            return jsonify({"message": "Uploaded file is empty."}), 400
+        if len(content) > 2 * 1024 * 1024:  # 2MB limit
+            return jsonify({"message": "File size exceeds 2MB limit."}), 413
+
+        try:
+            text = content.decode("utf-8", errors="replace")
+        except Exception:
+            return jsonify({"message": "Could not decode file content as UTF-8."}), 400
+
+        if filename.endswith(".csv"):
+            import csv
+            import io
+            reader = csv.reader(io.StringIO(text))
+            rows = [r for r in reader if r and any(cell.strip() for cell in r)]
+            if not rows:
+                return jsonify({"message": "CSV file contains no readable data."}), 400
+
+            # Auto-detect URL column header if present
+            url_col_idx = 0
+            header_found = False
+            for col_idx, cell in enumerate(rows[0]):
+                if cell.lower().strip() in {"url", "urls", "domain", "link", "website"}:
+                    url_col_idx = col_idx
+                    header_found = True
+                    break
+
+            start_row = 1 if header_found else 0
+            for r in rows[start_row:]:
+                if len(r) > url_col_idx and r[url_col_idx].strip():
+                    urls.append(r[url_col_idx].strip())
+        else:
+            # .txt file: one URL per line
+            for line in text.splitlines():
+                cleaned = line.strip()
+                if cleaned and not cleaned.startswith("#"):
+                    urls.append(cleaned)
+
+        # Deduplicate while preserving order
+        urls = list(dict.fromkeys(urls))
+        if not urls:
+            return jsonify({"message": "No valid URLs found in uploaded file."}), 400
+
+    # 2. JSON Body ({ "urls": [...] })
+    else:
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"message": "A JSON payload or file upload is required."}), 400
+        raw_urls = payload.get("urls")
+        if not isinstance(raw_urls, list) or not raw_urls:
+            return jsonify({"message": "A non-empty 'urls' array is required."}), 400
+
+        urls = [str(u).strip() for u in raw_urls if str(u).strip()]
+        urls = list(dict.fromkeys(urls))
+        if not urls:
+            return jsonify({"message": "A non-empty 'urls' array is required."}), 400
+
     if len(urls) > BULK_MAX_URLS:
         return jsonify({"message": f"At most {BULK_MAX_URLS} URLs per request."}), 413
 
@@ -522,7 +636,9 @@ def email_presets():
 @app.post("/api/email/scan")
 @app.post("/email/scan")
 def scan_email():
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"message": "A valid JSON object payload is required."}), 400
     raw_content = payload.get("raw_content", "")
     subject = payload.get("subject", "")
     sender = payload.get("sender", "")

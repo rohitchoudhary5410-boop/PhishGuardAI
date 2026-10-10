@@ -8,12 +8,16 @@ brand impersonation, spoofed headers, and malicious embedded links.
 from __future__ import annotations
 
 import re
+import uuid
 import email
 from email import policy
 from email.parser import Parser
 from urllib.parse import urlparse
 from typing import Dict, Any, List, Tuple
 import datetime as dt
+import itertools
+
+_scan_counter = itertools.count(1)
 
 # High-profile brands frequently targeted by impersonators
 PROTECTED_BRANDS = {
@@ -524,11 +528,62 @@ def evaluate_email_threat(
     else:
         recommendations.append("No active misleading patterns detected. Always remain vigilant.")
 
+    # Plain-English Explanation for Users
+    simple_reasons = []
+    if sender_analysis.get("impersonated_brand"):
+        simple_reasons.append(
+            f"Fake Identity: The sender pretends to be {sender_analysis['impersonated_brand']}, but the real email domain ({sender_analysis.get('domain')}) is not authorized."
+        )
+    elif sender_analysis.get("signals"):
+        for sig in sender_analysis["signals"]:
+            simple_reasons.append(sig["description"])
+
+    if content_analysis.get("categories"):
+        for cat in content_analysis["categories"]:
+            cat_name = cat["category"]
+            matches_str = ", ".join(f'"{m}"' for m in cat.get("matches", [])[:2])
+            if "urgency" in cat_name.lower():
+                simple_reasons.append(f"Manufactured Urgency: Uses pressure phrases ({matches_str}) to rush you into acting before verifying.")
+            elif "financial" in cat_name.lower() or "credential" in cat_name.lower():
+                simple_reasons.append(f"Credential / Billing Lure: Requests private login, PIN, or payment details.")
+            elif "generic" in cat_name.lower():
+                simple_reasons.append(f"Generic Greeting: Uses impersonal phrasing ({matches_str}) rather than addressing you by your real name.")
+            else:
+                simple_reasons.append(f"Scam Wording: Contains patterns commonly found in {cat_name}.")
+
+    for link in url_results:
+        if link.get("is_mismatched"):
+            simple_reasons.append(f"Misleading Link: The visible link text hides a completely different destination website ({link.get('target_domain')}).")
+        elif link.get("phishing_probability", 0) >= 0.5:
+            simple_reasons.append(f"Dangerous Website: Contains a link to '{link.get('target_domain')}', which our AI model flagged as a phishing site.")
+
+    if not simple_reasons:
+        if verdict == "Legitimate":
+            simple_reasons.append("Sender address matches verified domains, no coercive urgency was found, and all links appear clean.")
+        else:
+            simple_reasons.append("Multiple anomalies were flagged in the email structure.")
+
+    simple_summary = (
+        f"This email is a dangerous {verdict.lower()}. It is attempting to trick you into clicking malicious links or revealing sensitive personal/billing information."
+        if verdict == "Phishing / Scam"
+        else f"This email displays suspicious traits. Proceed with caution and do not click unfamiliar links or provide passwords."
+        if verdict == "Suspicious Activity"
+        else f"This email looks legitimate. No phishing tricks or suspicious impersonation attempts were detected."
+    )
+
+    simple_explanation = {
+        "summary": simple_summary,
+        "reasons": simple_reasons,
+        "actions": recommendations,
+    }
+
     return {
-        "scan_id": f"mail_{dt.datetime.now().strftime('%Y%m%d%H%M%S')}_{abs(hash(subject)) % 10000}",
+        "scan_id": f"mail_{next(_scan_counter)}_{uuid.uuid4().hex[:8]}",
         "scan_time": dt.datetime.now(dt.timezone.utc).isoformat(),
         "subject": subject,
         "sender": sender,
+        "body": body[:8000] if body else "",
+        "snippet": (body[:280].strip() + "...") if body and len(body) > 280 else (body or ""),
         "verdict": verdict,
         "threat_level": threat_level,
         "risk_score": composite_score,
@@ -541,7 +596,8 @@ def evaluate_email_threat(
         "links": url_results,
         "evidence": evidence,
         "recommendations": recommendations,
-        "analyzed_locally": True
+        "simple_explanation": simple_explanation,
+        "analyzed_locally": True,
     }
 
 

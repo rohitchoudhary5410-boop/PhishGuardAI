@@ -1,0 +1,33 @@
+# Virtual Environments
+venv/
+.venv/
+env/
+**/venv/
+**/.venv/
+
+# Large Archives
+*.zip
+*.tar.gz
+*.7z
+
+# Python Cache & Testing
+__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+.pytest_cache/
+
+# Dependencies & Build Artefacts
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+
+# Environment Variables & Credentials
+.env
+**/.env
+*.env.local
+
+# IDE & Editor files
+.vscode/
+.idea/

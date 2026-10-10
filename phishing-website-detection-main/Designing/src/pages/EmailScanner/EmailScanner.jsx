@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Mail,
   Shield,
@@ -17,7 +17,8 @@ import {
   FileText,
   Key,
   Flame,
-  ArrowRight
+  ArrowRight,
+  Lightbulb
 } from 'lucide-react';
 import { scanEmail, getEmailPresets, syncGmail } from '../../services/api';
 import { useToast } from '../../components/Toast/Toast';
@@ -25,6 +26,7 @@ import './EmailScanner.css';
 
 export default function EmailScanner() {
   const toast = useToast();
+  const detailRef = useRef(null);
   const [activeTab, setActiveTab] = useState('gmail-inbox'); // 'gmail-inbox' | 'manual-inspect'
   const [loading, setLoading] = useState(false);
   const [syncingInbox, setSyncingInbox] = useState(false);
@@ -389,30 +391,44 @@ export default function EmailScanner() {
                   const isSelected = selectedEmail?.scan_id === mail.scan_id;
                   return (
                     <div
-                      key={mail.scan_id || idx}
+                      key={mail.scan_id || `mail-${idx}`}
                       className={`email-row-card ${isSelected ? 'is-selected' : ''} theme--${mail.theme}`}
                       onClick={() => setSelectedEmail(mail)}
                     >
-                      <div className="email-row-header">
-                        <span className="email-sender-name" title={mail.sender}>
-                          {mail.sender_analysis?.display_name || mail.sender || 'Unknown Sender'}
-                        </span>
-                        {getVerdictBadge(mail.theme, mail.verdict, mail.risk_score)}
-                      </div>
-                      <div className="email-row-subject">{mail.subject || '(No Subject)'}</div>
-                      <div className="email-row-footer">
-                        <span className="email-domain-tag">
-                          {mail.sender_analysis?.domain || 'unverified'}
-                        </span>
-                        {mail.evidence?.length > 0 && (
-                          <span className="evidence-count-tag">
-                            {mail.evidence.length} red flag{mail.evidence.length > 1 ? 's' : ''}
-                          </span>
+                      <div className="email-row-risk-bar">
+                        <div className={`risk-score-circle risk-score--${mail.theme}`}>
+                          <span className="risk-score-num">{mail.risk_score}</span>
+                        </div>
+                        <div className="email-row-content">
+                          <div className="email-row-header">
+                            <span className="email-sender-name" title={mail.sender}>
+                              {mail.sender_analysis?.display_name || mail.sender || 'Unknown Sender'}
+                            </span>
+                            {getVerdictBadge(mail.theme, mail.verdict, mail.risk_score)}
+                          </div>
+                          <div className="email-row-subject">{mail.subject || '(No Subject)'}</div>
+                          {mail.snippet && (
+                            <div className="email-row-snippet">{mail.snippet.slice(0, 100)}{mail.snippet.length > 100 ? '…' : ''}</div>
+                          )}
+                          <div className="email-row-footer">
+                            <span className="email-domain-tag">
+                              {mail.sender_analysis?.domain || 'unverified'}
+                            </span>
+                            {mail.evidence?.length > 0 && (
+                              <span className="evidence-count-tag">
+                                {mail.evidence.length} red flag{mail.evidence.length > 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {isSelected && (
+                          <ChevronRight size={18} className="email-row-chevron" />
                         )}
                       </div>
                     </div>
                   );
                 })
+
               )}
             </div>
 
@@ -760,6 +776,7 @@ function EmailDetailReport({ report }) {
     links,
     evidence,
     recommendations,
+    simple_explanation,
   } = report;
 
   return (
@@ -787,6 +804,65 @@ function EmailDetailReport({ report }) {
         <div className="score-meter-box">
           <div className="score-number">{risk_score}</div>
           <div className="score-subtext">Composite Threat Score / 100</div>
+        </div>
+      </div>
+
+      {/* Highlighted Plain English / Simple Language Explanation */}
+      <div className={`simple-explain-container theme--${theme}`}>
+        <div className="simple-explain-header">
+          <div className="simple-explain-tag">
+            <Lightbulb size={18} className="simple-bulb-icon" />
+            <span>Plain English Security Breakdown</span>
+          </div>
+          <span className="simple-explain-badge">
+            {theme === 'danger' ? '🚨 High Risk Alert' : theme === 'warning' ? '⚠️ Caution Required' : '✅ Verified Safe'}
+          </span>
+        </div>
+
+        <div className="simple-explain-summary">
+          {simple_explanation?.summary ||
+            (risk_score >= 70
+              ? 'This email is a dangerous phishing scam. It pretends to be a trusted service to panic you into clicking fake links and revealing your private login or payment information.'
+              : risk_score >= 35
+              ? 'This email exhibits suspicious traits. Proceed with caution and do not click unfamiliar links or share passwords.'
+              : 'This email appears authentic and safe. No deceptive social engineering or malicious links were detected.')}
+        </div>
+
+        {((simple_explanation?.reasons && simple_explanation.reasons.length > 0) || (evidence && evidence.length > 0)) && (
+          <div className="simple-reasons-box">
+            <div className="simple-reasons-label">Why this was flagged in simple terms:</div>
+            <ul className="simple-reasons-list">
+              {simple_explanation?.reasons?.length > 0
+                ? simple_explanation.reasons.map((reason, idx) => (
+                    <li key={idx}>
+                      <span className="reason-bullet">⚡</span>
+                      <span>{reason}</span>
+                    </li>
+                  ))
+                : evidence.slice(0, 3).map((ev, idx) => (
+                    <li key={idx}>
+                      <span className="reason-bullet">⚡</span>
+                      <span><strong>{ev.title}:</strong> {ev.description}</span>
+                    </li>
+                  ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="simple-actions-box">
+          <div className="simple-actions-label">🛡️ Recommended Next Steps:</div>
+          <ul className="simple-actions-list">
+            {(simple_explanation?.actions || recommendations || [
+              'Do NOT click any links, open attachments, or reply to this message.',
+              'Never enter payment, banking, or password details on linked sites.',
+              'Report this email as Phishing / Fraud and delete it.'
+            ]).map((act, idx) => (
+              <li key={idx}>
+                <CheckCircle2 size={16} className="action-check-icon" />
+                <span>{act}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
 

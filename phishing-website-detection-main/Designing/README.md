@@ -7,7 +7,7 @@
 
 PhishGuard AI is an advanced, machine-learning-powered web application designed to analyze and detect phishing websites in real-time. By extracting 111 distinct features from a URL (ranging from lexical properties to live DNS/TLS metrics) and feeding them into a trained Random Forest model, the system provides high-confidence risk assessments to protect users from malicious sites.
 
-> **Developed by Yash Gajera**
+> **Developed by Infinity Coders**
 
 ---
 
@@ -109,4 +109,4 @@ The application uses a **Random Forest Classifier** trained on a dataset of legi
 ---
 
 ## 📄 License
-This project was developed by Yash Gajera.
+This project was developed by Infinity Coders.

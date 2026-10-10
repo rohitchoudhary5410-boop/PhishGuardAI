@@ -26,6 +26,18 @@
   color: var(--text-primary);
   margin-bottom: var(--space-2);
   letter-spacing: var(--tracking-tight);
+  display: inline-block;
+  cursor: default;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.2s ease;
+}
+
+.dashboard-page-title:hover {
+  transform: translateY(-2px) scale(1.02);
+  color: var(--primary-600);
+}
+
+[data-theme='dark'] .dashboard-page-title:hover {
+  color: var(--primary-400);
 }
 
 .dashboard-page-subtitle {

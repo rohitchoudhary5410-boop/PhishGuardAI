@@ -40,6 +40,11 @@
   text-decoration: none;
   color: var(--text-primary);
   flex-shrink: 0;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.navbar-brand:hover {
+  transform: translateY(-2px) scale(1.03);
 }
 
 .navbar-logo {
@@ -52,6 +57,12 @@
   justify-content: center;
   color: white;
   flex-shrink: 0;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease;
+}
+
+.navbar-brand:hover .navbar-logo {
+  transform: scale(1.1) rotate(-6deg);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
 }
 
 .navbar-title {
@@ -59,6 +70,7 @@
   font-weight: var(--font-bold);
   letter-spacing: var(--tracking-tight);
   white-space: nowrap;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .navbar-title span {
@@ -72,37 +84,60 @@
 .navbar-nav {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
   /* Allows the link row to shrink before it forces the bar to overflow. */
   min-width: 0;
-  overflow: hidden;
+  padding: 4px 0;
 }
 
 .nav-link {
+  display: inline-flex;
+  align-items: center;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   color: var(--text-secondary);
   font-size: var(--text-sm);
   font-weight: var(--font-medium);
-  transition: color var(--duration-fast) var(--ease-out),
-              background var(--duration-fast) var(--ease-out);
+  transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
   text-decoration: none;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .nav-link:hover {
-  color: var(--text-primary);
+  color: var(--primary-600);
   background: var(--bg-hover);
+  transform: translateY(-2.5px) scale(1.05);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.16);
 }
 
 .nav-link.active {
   color: var(--primary-600);
   background: var(--primary-50);
+  font-weight: var(--font-semibold);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
+}
+
+.nav-link.active:hover {
+  transform: translateY(-3.5px) scale(1.07);
+  box-shadow: 0 6px 18px rgba(99, 102, 241, 0.24);
+}
+
+[data-theme='dark'] .nav-link:hover {
+  color: var(--primary-300);
+  background: rgba(99, 102, 241, 0.15);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
 }
 
 [data-theme='dark'] .nav-link.active {
   color: var(--primary-400);
   background: var(--viz-indigo-soft);
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.2);
+}
+
+[data-theme='dark'] .nav-link.active:hover {
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
 }
 
 .navbar-actions {
@@ -120,13 +155,14 @@
   align-items: center;
   justify-content: center;
   color: var(--text-secondary);
-  transition: color var(--duration-fast) var(--ease-out),
-              background var(--duration-fast) var(--ease-out);
+  transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .theme-toggle:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+  transform: translateY(-2px) scale(1.08);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
 }
 
 /* ---------- API Status Indicator ---------- */
@@ -141,7 +177,12 @@
   font-size: var(--text-xs);
   font-weight: 500;
   cursor: help;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.api-status-badge:hover {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.18);
 }
 
 .api-status-dot {
