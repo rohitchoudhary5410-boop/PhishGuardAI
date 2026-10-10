@@ -160,20 +160,57 @@ HREF_REGEX = re.compile(
 )
 
 
+def are_domains_same_entity(d1: str, d2: str) -> bool:
+    """Checks whether two domains belong to the same brand or parent enterprise."""
+    if not d1 or not d2:
+        return False
+    a1 = extract_apex_domain(d1).lower()
+    a2 = extract_apex_domain(d2).lower()
+    if a1 == a2:
+        return True
+    for brand, domains in PROTECTED_BRANDS.items():
+        domain_apexes = {extract_apex_domain(d).lower() for d in domains}
+        if a1 in domain_apexes and a2 in domain_apexes:
+            return True
+    return False
+
+
 def extract_domain(email_or_url: str) -> str:
     """Extract clean lowercase domain from email or URL."""
-    val = email_or_url.strip().lower()
-    if "@" in val:
-        parts = val.split("@")
-        return parts[-1].strip(" >")
-    if not val.startswith(("http://", "https://")):
-        val = "http://" + val
-    try:
-        parsed = urlparse(val)
-        domain = parsed.hostname or ""
-        return domain.lower()
-    except Exception:
+    import html as html_mod
+    val = html_mod.unescape(email_or_url).strip().lower()
+    if not val:
         return ""
+    if val.startswith(("http://", "https://")):
+        try:
+            parsed = urlparse(val)
+            host = (parsed.hostname or "").lower()
+            if "&" in host:
+                host = host.split("&")[0]
+            if "?" in host:
+                host = host.split("?")[0]
+            return host
+        except Exception:
+            pass
+
+    if "@" in val:
+        val = val.split("@")[-1]
+
+    for sep in ("&", "?", "/", "#", ";", " ", "\t", "\n", ">", "<", '"', "'"):
+        if sep in val:
+            val = val.split(sep)[0]
+    val = val.strip(" >\"'")
+
+    try:
+        parsed = urlparse("http://" + val)
+        host = (parsed.hostname or "").lower()
+        if "&" in host:
+            host = host.split("&")[0]
+        if "?" in host:
+            host = host.split("?")[0]
+        return host
+    except Exception:
+        return val
 
 
 def parse_email_message(raw_content: str) -> Dict[str, Any]:
@@ -434,7 +471,7 @@ def extract_and_inspect_links(text: str, html: str = "") -> List[Dict[str, Any]]
             if anchor_domain and target_domain:
                 anchor_apex = extract_apex_domain(anchor_domain)
                 target_apex = extract_apex_domain(target_domain)
-                if anchor_apex and target_apex and anchor_apex.lower() != target_apex.lower():
+                if anchor_apex and target_apex and not are_domains_same_entity(anchor_domain, target_domain):
                     if any(brand in anchor_domain.lower() for brand in PROTECTED_BRANDS) or anchor_apex.lower() in KNOWN_SAFE_APEX_DOMAINS:
                         is_mismatched = True
                         deception_warning = f"Anchor text displays '{anchor_text}' ({anchor_domain}), but link actually routes to deceptive target '{target_domain}'."
@@ -480,14 +517,18 @@ def evaluate_email_threat(
     Main evaluation pipeline.
     Combines Sender Verification + Content Social Engineering + ML URL Scanner.
     """
-    if raw_content and (not subject and not body):
+    html = ""
+    if raw_content:
         parsed = parse_email_message(raw_content)
-        subject = parsed.get("subject", "")
-        sender = parsed.get("from", "")
-        body = parsed.get("body", "")
+        if not subject:
+            subject = parsed.get("subject", "")
+        if not sender:
+            sender = parsed.get("from", "")
+        if not body:
+            body = parsed.get("body", "")
         html = parsed.get("html", "")
-    else:
-        html = ""
+    if not html and body and "<a " in body.lower():
+        html = body
         
     sender_analysis = analyze_sender_spoofing(sender)
     content_analysis = analyze_scam_content(subject, body)
@@ -507,8 +548,8 @@ def evaluate_email_threat(
         target_domain = link_item["target_domain"]
         target_apex = extract_apex_domain(target_domain)
         
-        is_same_org = bool(sender_apex and target_apex and sender_apex.lower() == target_apex.lower())
-        is_safe_apex = target_apex.lower() in KNOWN_SAFE_APEX_DOMAINS
+        is_same_org = bool(sender_apex and target_apex and are_domains_same_entity(sender_apex, target_apex))
+        is_safe_apex = (target_apex.lower() in KNOWN_SAFE_APEX_DOMAINS) or is_same_org
         is_trusted = (is_same_org or is_safe_apex) and not link_item["is_mismatched"]
 
         url_threat_info = {

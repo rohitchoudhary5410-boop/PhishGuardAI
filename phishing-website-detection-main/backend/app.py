@@ -277,6 +277,16 @@ def score_url(url: str, overrides: dict | None = None, with_network: bool = True
         p_phishing = 0.0
         prediction = "Legitimate"
         confidence = 0.999
+    elif not overrides:
+        host_apex = email_scanner.extract_apex_domain(host_clean)
+        is_verified_safe = bool(
+            host_apex
+            and host_apex in email_scanner.KNOWN_SAFE_APEX_DOMAINS
+            and (host_clean == host_apex or host_clean.endswith("." + host_apex))
+        )
+        if is_verified_safe:
+            p_phishing = min(p_phishing, 0.05)
+            prediction, confidence = _verdict(p_phishing)
 
     unavailable = [name for name in FEATURE_ORDER if named[name] == -1]
 
