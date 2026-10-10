@@ -653,7 +653,7 @@ def scan_email():
         return jsonify({"message": "A valid JSON object payload is required."}), 400
     raw_content = payload.get("raw_content", "")
     subject = payload.get("subject", "")
-    sender = payload.get("sender", "")
+    sender = payload.get("sender") or payload.get("from", "")
     body = payload.get("body", "")
 
     if not raw_content and not body and not subject:

@@ -21,25 +21,68 @@ _scan_counter = itertools.count(1)
 
 # High-profile brands frequently targeted by impersonators
 PROTECTED_BRANDS = {
-    "google": ["google.com", "googlemail.com", "gmail.com", "google-workspace.com"],
+    "google": ["google.com", "googlemail.com", "gmail.com", "google-workspace.com", "google.co.in"],
     "gmail": ["gmail.com", "google.com"],
+    "youtube": ["youtube.com", "google.com"],
+    "samsung": ["samsung.com", "samsungmail.com", "samsung.in"],
     "paypal": ["paypal.com", "paypal-communication.com"],
     "amazon": ["amazon.com", "amazon.co.uk", "amazon.in", "amazon.de"],
     "microsoft": ["microsoft.com", "office.com", "outlook.com", "live.com"],
     "apple": ["apple.com", "icloud.com"],
-    "netflix": ["netflix.com"],
+    "netflix": ["netflix.com", "netflixmail.com"],
     "chase": ["chase.com"],
     "bank of america": ["bankofamerica.com", "bofa.com"],
     "wells fargo": ["wellsfargo.com"],
     "facebook": ["facebook.com", "meta.com", "facebookmail.com"],
     "meta": ["meta.com", "facebook.com", "instagram.com"],
     "instagram": ["instagram.com", "mail.instagram.com"],
+    "moneycontrol": ["moneycontrol.com"],
     "binance": ["binance.com"],
     "coinbase": ["coinbase.com"],
     "dhl": ["dhl.com", "dhl.de"],
     "fedex": ["fedex.com"],
     "irs": ["irs.gov"],
+    "linkedin": ["linkedin.com"],
+    "github": ["github.com"],
+    "twitter": ["twitter.com", "x.com"],
+    "spotify": ["spotify.com"],
+    "flipkart": ["flipkart.com"],
+    "swiggy": ["swiggy.in", "swiggy.com"],
+    "zomato": ["zomato.com"],
+    "hdfc": ["hdfcbank.com", "hdfcbank.net"],
+    "icici": ["icicibank.com"],
+    "sbi": ["sbi.co.in", "onlinesbi.sbi"]
 }
+
+KNOWN_SAFE_APEX_DOMAINS = {
+    "google.com", "googlemail.com", "gmail.com", "youtube.com", "google.co.in",
+    "samsung.com", "samsungmail.com", "samsung.in",
+    "amazon.com", "amazon.in", "amazon.co.uk", "amazon.de",
+    "apple.com", "icloud.com",
+    "microsoft.com", "office.com", "outlook.com", "live.com",
+    "netflix.com", "netflixmail.com",
+    "paypal.com", "paypal-communication.com",
+    "moneycontrol.com",
+    "github.com", "linkedin.com", "twitter.com", "x.com",
+    "facebook.com", "meta.com", "instagram.com", "whatsapp.com",
+    "adobe.com", "spotify.com", "uber.com", "flipkart.com", "swiggy.in", "zomato.com",
+    "chase.com", "hdfcbank.com", "icicibank.com", "sbi.co.in"
+}
+
+
+def extract_apex_domain(domain_str: str) -> str:
+    """Extract registered apex domain (e.g. 'samsung.com' from 't6.in.email.samsung.com')."""
+    val = domain_str.strip().lower()
+    if not val:
+        return ""
+    parts = val.split(".")
+    if len(parts) <= 2:
+        return val
+    multi_tlds = {"co.in", "co.uk", "com.au", "gov.in", "org.uk", "ac.in", "net.in", "com.br", "co.jp"}
+    if len(parts) >= 3 and f"{parts[-2]}.{parts[-1]}" in multi_tlds:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
+
 
 # Free webmail services often abused for corporate impersonation
 FREE_MAIL_PROVIDERS = [
@@ -217,25 +260,57 @@ def analyze_sender_spoofing(from_header: str) -> Dict[str, Any]:
         display_name = from_header.strip()
         
     sender_domain = extract_domain(address)
+    sender_apex = extract_apex_domain(sender_domain)
     name_lower = display_name.lower()
     
     signals = []
     risk_score = 0
     impersonated_brand = None
-    
+    is_sender_authorized = False
+    verified_brand = None
+
+    # Free webmail providers are consumer inboxes, NOT authorized enterprise sender domains
+    is_free_mail = (sender_domain in FREE_MAIL_PROVIDERS) or (sender_apex in FREE_MAIL_PROVIDERS)
+
+    # Check if sender domain itself belongs to known authorized brands
+    if not is_free_mail:
+        for brand, legitimate_domains in PROTECTED_BRANDS.items():
+            if any(
+                sender_domain == d
+                or sender_domain.endswith("." + d)
+                or sender_apex == extract_apex_domain(d)
+                for d in legitimate_domains
+            ):
+                is_sender_authorized = True
+                verified_brand = brand.capitalize()
+                break
+
+        if not is_sender_authorized and sender_apex in KNOWN_SAFE_APEX_DOMAINS:
+            is_sender_authorized = True
+
     # Brand Impersonation check
     for brand, legitimate_domains in PROTECTED_BRANDS.items():
         if brand in name_lower:
-            impersonated_brand = brand.capitalize()
             # Check if domain actually matches the brand's authorized domains
-            is_authorized = any(sender_domain == d or sender_domain.endswith("." + d) for d in legitimate_domains)
+            is_authorized = any(
+                sender_domain == d
+                or sender_domain.endswith("." + d)
+                or sender_apex == extract_apex_domain(d)
+                for d in legitimate_domains
+            )
             if not is_authorized:
+                impersonated_brand = brand.capitalize()
                 risk_score += 45
                 signals.append({
                     "severity": "critical",
                     "title": f"High-Confidence Brand Impersonation ({impersonated_brand})",
                     "description": f"The sender claims to be '{display_name}', but the email originates from unverified domain '{sender_domain}'."
                 })
+                break
+            else:
+                is_sender_authorized = True
+                verified_brand = brand.capitalize()
+                impersonated_brand = None
                 break
                 
     # Corporate impersonation using free email accounts
@@ -278,6 +353,9 @@ def analyze_sender_spoofing(from_header: str) -> Dict[str, Any]:
         "display_name": display_name,
         "address": address,
         "domain": sender_domain,
+        "apex_domain": sender_apex,
+        "is_authorized": is_sender_authorized,
+        "verified_brand": verified_brand,
         "impersonated_brand": impersonated_brand,
         "risk_score": min(risk_score, 100),
         "signals": signals
@@ -353,10 +431,13 @@ def extract_and_inspect_links(text: str, html: str = "") -> List[Dict[str, Any]]
             
             is_mismatched = False
             deception_warning = None
-            if anchor_domain and target_domain and anchor_domain != target_domain:
-                if any(brand in anchor_domain for brand in PROTECTED_BRANDS):
-                    is_mismatched = True
-                    deception_warning = f"Anchor text displays '{anchor_text}' ({anchor_domain}), but link actually routes to deceptive target '{target_domain}'."
+            if anchor_domain and target_domain:
+                anchor_apex = extract_apex_domain(anchor_domain)
+                target_apex = extract_apex_domain(target_domain)
+                if anchor_apex and target_apex and anchor_apex.lower() != target_apex.lower():
+                    if any(brand in anchor_domain.lower() for brand in PROTECTED_BRANDS) or anchor_apex.lower() in KNOWN_SAFE_APEX_DOMAINS:
+                        is_mismatched = True
+                        deception_warning = f"Anchor text displays '{anchor_text}' ({anchor_domain}), but link actually routes to deceptive target '{target_domain}'."
             
             links.append({
                 "url": href,
@@ -412,6 +493,10 @@ def evaluate_email_threat(
     content_analysis = analyze_scam_content(subject, body)
     extracted_links = extract_and_inspect_links(body, html)
     
+    sender_domain = sender_analysis.get("domain", "")
+    sender_apex = sender_analysis.get("apex_domain", extract_apex_domain(sender_domain))
+    is_sender_authorized = sender_analysis.get("is_authorized", False)
+
     # Run ML Model over extracted URLs
     url_results = []
     max_url_phishing_prob = 0.0
@@ -419,12 +504,20 @@ def evaluate_email_threat(
     
     for link_item in extracted_links[:10]: # inspect up to 10 URLs
         url = link_item["url"]
+        target_domain = link_item["target_domain"]
+        target_apex = extract_apex_domain(target_domain)
+        
+        is_same_org = bool(sender_apex and target_apex and sender_apex.lower() == target_apex.lower())
+        is_safe_apex = target_apex.lower() in KNOWN_SAFE_APEX_DOMAINS
+        is_trusted = (is_same_org or is_safe_apex) and not link_item["is_mismatched"]
+
         url_threat_info = {
             "url": url,
-            "target_domain": link_item["target_domain"],
+            "target_domain": target_domain,
             "anchor_text": link_item["anchor_text"],
             "is_mismatched": link_item["is_mismatched"],
             "deception_warning": link_item["deception_warning"],
+            "is_trusted": is_trusted,
             "prediction": "Unknown",
             "phishing_probability": 0.0,
             "risk_score": 0
@@ -434,16 +527,29 @@ def evaluate_email_threat(
             try:
                 res = predict_fn(url)
                 prob = res.get("phishing_probability", 0.0)
-                url_threat_info["phishing_probability"] = round(prob, 4)
-                url_threat_info["prediction"] = res.get("prediction", "Unknown")
-                url_threat_info["risk_score"] = res.get("risk_score", int(prob * 100))
                 
-                if prob > max_url_phishing_prob:
-                    max_url_phishing_prob = prob
-                if prob >= 0.5 or link_item["is_mismatched"]:
-                    malicious_link_count += 1
+                if is_trusted:
+                    # Multi-dot tracking subdomains (e.g. t6.in.email.samsung.com) trigger lexical FP.
+                    # As target apex belongs to verified enterprise/sender org, normalize threat.
+                    prob = min(prob, 0.10)
+                    url_threat_info["phishing_probability"] = round(prob, 4)
+                    url_threat_info["prediction"] = "Legitimate"
+                    url_threat_info["risk_score"] = int(prob * 100)
+                else:
+                    url_threat_info["phishing_probability"] = round(prob, 4)
+                    url_threat_info["prediction"] = res.get("prediction", "Unknown")
+                    url_threat_info["risk_score"] = res.get("risk_score", int(prob * 100))
+                    
+                    if prob > max_url_phishing_prob:
+                        max_url_phishing_prob = prob
+                    if prob >= 0.70:
+                        malicious_link_count += 1
             except Exception as e:
                 url_threat_info["error"] = str(e)
+                
+        if link_item["is_mismatched"]:
+            malicious_link_count += 1
+            max_url_phishing_prob = max(max_url_phishing_prob, 0.85)
                 
         url_results.append(url_threat_info)
         
@@ -455,21 +561,29 @@ def evaluate_email_threat(
     if any(l["is_mismatched"] for l in extracted_links):
         url_score = max(url_score, 85)
         
-    if not extracted_links:
-        composite_score = int((sender_score * 0.50) + (content_score * 0.50))
+    has_critical_sender = any(s["severity"] == "critical" for s in sender_analysis["signals"])
+
+    if is_sender_authorized and not has_critical_sender and malicious_link_count == 0 and not any(l["is_mismatched"] for l in extracted_links):
+        # Genuine corporate emails/alerts from authorized senders (Samsung, Google, Moneycontrol, etc.)
+        content_score = min(content_score, 10)
+        url_score = min(url_score, 12)
+        composite_score = min(int((sender_score * 0.35) + (content_score * 0.30) + (url_score * 0.35)), 15)
     else:
-        composite_score = int(
-            (sender_score * 0.35) +
-            (content_score * 0.30) +
-            (url_score * 0.35)
-        )
-        
-    # Force high risk if critical brand impersonation or malicious URL detected
-    if any(s["severity"] == "critical" for s in sender_analysis["signals"]):
-        composite_score = max(composite_score, 82)
-    if malicious_link_count > 0:
-        composite_score = max(composite_score, 80)
-        
+        if not extracted_links:
+            composite_score = int((sender_score * 0.50) + (content_score * 0.50))
+        else:
+            composite_score = int(
+                (sender_score * 0.35) +
+                (content_score * 0.30) +
+                (url_score * 0.35)
+            )
+            
+        # Force high risk if critical brand impersonation or malicious URL detected
+        if has_critical_sender:
+            composite_score = max(composite_score, 82)
+        if malicious_link_count > 0:
+            composite_score = max(composite_score, 80)
+            
     # Assign Verdict
     if composite_score >= 70:
         verdict = "Phishing / Scam"
@@ -493,13 +607,14 @@ def evaluate_email_threat(
             "title": sig["title"],
             "description": sig["description"]
         })
-    for finding in content_analysis["findings"]:
-        evidence.append({
-            "source": "Message Content",
-            "severity": finding["severity"],
-            "title": finding["title"],
-            "description": finding["description"]
-        })
+    if verdict != "Legitimate":
+        for finding in content_analysis["findings"]:
+            evidence.append({
+                "source": "Message Content",
+                "severity": finding["severity"],
+                "title": finding["title"],
+                "description": finding["description"]
+            })
     for link in url_results:
         if link.get("is_mismatched"):
             evidence.append({
@@ -508,13 +623,22 @@ def evaluate_email_threat(
                 "title": "Anchor Text URL Mismatch Detected",
                 "description": link["deception_warning"]
             })
-        elif link.get("phishing_probability", 0) >= 0.7:
+        elif link.get("phishing_probability", 0) >= 0.70 and not link.get("is_trusted"):
             evidence.append({
                 "source": "Embedded Hyperlinks",
                 "severity": "high",
                 "title": "High-Confidence Phishing Link Detected",
                 "description": f"URL '{link['url']}' identified as malicious by Random Forest model ({int(link['phishing_probability']*100)}% risk)."
             })
+
+    if not evidence and verdict == "Legitimate":
+        brand_name = sender_analysis.get("verified_brand") or sender_domain or "known service"
+        evidence.append({
+            "source": "Sender Verification",
+            "severity": "low",
+            "title": "Verified Authentic Communication",
+            "description": f"Email originates from authentic {brand_name} domain and all embedded links point to safe destinations."
+        })
 
     # Recommended Actions
     recommendations = []
@@ -526,49 +650,67 @@ def evaluate_email_threat(
         recommendations.append("Exercise extreme caution: Verify the sender through a known, trusted official phone number or website.")
         recommendations.append("Do not click direct links. Navigate manually to the service's official homepage.")
     else:
-        recommendations.append("No active misleading patterns detected. Always remain vigilant.")
+        recommendations.append("This message appears legitimate and safe.")
+        recommendations.append("Always exercise general caution before sharing sensitive credentials or one-time passcodes.")
 
     # Plain-English Explanation for Users
     simple_reasons = []
-    if sender_analysis.get("impersonated_brand"):
-        simple_reasons.append(
-            f"Fake Identity: The sender pretends to be {sender_analysis['impersonated_brand']}, but the real email domain ({sender_analysis.get('domain')}) is not authorized."
-        )
-    elif sender_analysis.get("signals"):
-        for sig in sender_analysis["signals"]:
-            simple_reasons.append(sig["description"])
-
-    if content_analysis.get("categories"):
-        for cat in content_analysis["categories"]:
-            cat_name = cat["category"]
-            matches_str = ", ".join(f'"{m}"' for m in cat.get("matches", [])[:2])
-            if "urgency" in cat_name.lower():
-                simple_reasons.append(f"Manufactured Urgency: Uses pressure phrases ({matches_str}) to rush you into acting before verifying.")
-            elif "financial" in cat_name.lower() or "credential" in cat_name.lower():
-                simple_reasons.append(f"Credential / Billing Lure: Requests private login, PIN, or payment details.")
-            elif "generic" in cat_name.lower():
-                simple_reasons.append(f"Generic Greeting: Uses impersonal phrasing ({matches_str}) rather than addressing you by your real name.")
-            else:
-                simple_reasons.append(f"Scam Wording: Contains patterns commonly found in {cat_name}.")
-
-    for link in url_results:
-        if link.get("is_mismatched"):
-            simple_reasons.append(f"Misleading Link: The visible link text hides a completely different destination website ({link.get('target_domain')}).")
-        elif link.get("phishing_probability", 0) >= 0.5:
-            simple_reasons.append(f"Dangerous Website: Contains a link to '{link.get('target_domain')}', which our AI model flagged as a phishing site.")
-
-    if not simple_reasons:
-        if verdict == "Legitimate":
-            simple_reasons.append("Sender address matches verified domains, no coercive urgency was found, and all links appear clean.")
+    if verdict == "Legitimate":
+        if is_sender_authorized:
+            brand_name = sender_analysis.get("verified_brand") or sender_domain
+            simple_reasons.append(f"Authentic Sender: Originates from verified {brand_name} infrastructure ({sender_domain}).")
         else:
-            simple_reasons.append("Multiple anomalies were flagged in the email structure.")
+            simple_reasons.append("Sender Verification: Originates from a normal sender address without spoofing indicators.")
+        simple_reasons.append("Clean Destination Links: Embedded links point to legitimate organizational domains.")
+    else:
+        if sender_analysis.get("impersonated_brand"):
+            simple_reasons.append(
+                f"Fake Identity: The sender pretends to be {sender_analysis['impersonated_brand']}, but the real email domain ({sender_analysis.get('domain')}) is not authorized."
+            )
+        elif sender_analysis.get("signals"):
+            for sig in sender_analysis["signals"]:
+                simple_reasons.append(sig["description"])
+
+        if content_analysis.get("categories"):
+            for cat in content_analysis["categories"]:
+                cat_name = cat["category"]
+                matches_str = ", ".join(f'"{m}"' for m in cat.get("matches", [])[:2])
+                if "urgency" in cat_name.lower():
+                    simple_reasons.append(f"Manufactured Urgency: Uses pressure phrases ({matches_str}) to rush you into acting before verifying.")
+                elif "financial" in cat_name.lower() or "credential" in cat_name.lower():
+                    simple_reasons.append(f"Credential / Billing Lure: Requests private login, PIN, or payment details.")
+                elif "generic" in cat_name.lower():
+                    simple_reasons.append(f"Generic Greeting: Uses impersonal phrasing ({matches_str}) rather than addressing you by your real name.")
+                else:
+                    simple_reasons.append(f"Scam Wording: Contains patterns commonly found in {cat_name}.")
+
+        seen_domains = set()
+        for link in url_results:
+            td = link.get("target_domain")
+            if link.get("is_mismatched"):
+                if td not in seen_domains:
+                    seen_domains.add(td)
+                    simple_reasons.append(f"Misleading Link: The visible link text hides a completely different destination website ({td}).")
+            elif link.get("phishing_probability", 0) >= 0.70 and not link.get("is_trusted"):
+                if td not in seen_domains:
+                    seen_domains.add(td)
+                    simple_reasons.append(f"Dangerous Website: Contains a link to '{td}', which our AI model flagged as a phishing site.")
+
+    # Deduplicate reasons while preserving order
+    seen_reasons = set()
+    deduped_reasons = []
+    for r in simple_reasons:
+        if r not in seen_reasons:
+            seen_reasons.add(r)
+            deduped_reasons.append(r)
+    simple_reasons = deduped_reasons
 
     simple_summary = (
         f"This email is a dangerous {verdict.lower()}. It is attempting to trick you into clicking malicious links or revealing sensitive personal/billing information."
         if verdict == "Phishing / Scam"
         else f"This email displays suspicious traits. Proceed with caution and do not click unfamiliar links or provide passwords."
         if verdict == "Suspicious Activity"
-        else f"This email looks legitimate. No phishing tricks or suspicious impersonation attempts were detected."
+        else f"This email is secure and legitimate. No phishing threats, spoofed sender addresses, or dangerous links were detected."
     )
 
     simple_explanation = {
