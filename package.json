@@ -1,0 +1,11 @@
+{
+  "name": "phishguard-ai",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm --prefix phishing-website-detection-main/Designing run build",
+    "dev": "npm --prefix phishing-website-detection-main/Designing run dev",
+    "preview": "npm --prefix phishing-website-detection-main/Designing run preview"
+  }
+}
