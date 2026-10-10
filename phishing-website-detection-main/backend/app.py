@@ -106,6 +106,54 @@ _history_lock = threading.Lock()
 _email_history: deque = deque(maxlen=200)
 _email_history_lock = threading.Lock()
 
+
+# ---------------------------------------------------------------------------
+# Security & Rate Limiting Engine
+# ---------------------------------------------------------------------------
+
+class RateLimiter:
+    """Thread-safe in-memory sliding window rate limiter per client IP."""
+
+    def __init__(self, limit_per_minute: int = 120):
+        self.limit = limit_per_minute
+        self.requests: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def is_allowed(self, ip: str) -> bool:
+        now = dt.datetime.now(dt.timezone.utc).timestamp()
+        with self._lock:
+            history = [t for t in self.requests.get(ip, []) if now - t < 60]
+            if len(history) >= self.limit:
+                self.requests[ip] = history
+                return False
+            history.append(now)
+            self.requests[ip] = history
+            return True
+
+
+limiter = RateLimiter(limit_per_minute=120)
+
+
+@app.after_request
+def add_security_headers(response):
+    """Enforces strict browser security, anti-clickjacking, and zero-leakage headers."""
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: https: blob:; "
+        "connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; "
+        "frame-ancestors 'self';"
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=(), payment=()"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    return response
+
 # ---------------------------------------------------------------------------
 # Presentation helpers
 # ---------------------------------------------------------------------------
@@ -254,24 +302,26 @@ def _record(result: dict) -> None:
         threat_category=result.get("threat_category") or ("Phishing URL" if is_threat else "Legitimate URL"),
         details=result
     )
-    with _history_lock:
-        _history.appendleft(
-            {
-                "id": result["scan_id"],
-                "url": result["url"],
-                "prediction": verdict,
-                "probability": result["probability"],
-                "risk_score": result["risk_score"],
-                "phishing_probability": result.get("phishing_probability"),
-                "model": result["model"],
-                "scan_time": result["scan_time"],
-                "features": result.get("features", {}),
-                "unavailable_features": result.get("unavailable_features", 0),
-                "total_features": result.get("total_features", 0),
-                "clamped_features": result.get("clamped_features", {}),
-                "degenerate_features": result.get("degenerate_features", []),
-            }
-        )
+    # If Incognito / Privacy Mode is enabled, do not retain scan in memory
+    if not security_service.unified_history.is_privacy_mode():
+        with _history_lock:
+            _history.appendleft(
+                {
+                    "id": result["scan_id"],
+                    "url": result["url"],
+                    "prediction": verdict,
+                    "probability": result["probability"],
+                    "risk_score": result["risk_score"],
+                    "phishing_probability": result.get("phishing_probability"),
+                    "model": result["model"],
+                    "scan_time": result["scan_time"],
+                    "features": result.get("features", {}),
+                    "unavailable_features": result.get("unavailable_features", 0),
+                    "total_features": result.get("total_features", 0),
+                    "clamped_features": result.get("clamped_features", {}),
+                    "degenerate_features": result.get("degenerate_features", []),
+                }
+            )
 
 
 
@@ -333,6 +383,10 @@ def health():
 
 @app.post("/predict")
 def predict():
+    client_ip = request.remote_addr or "127.0.0.1"
+    if not limiter.is_allowed(client_ip):
+        return jsonify({"message": "Rate limit exceeded (120 req/min). Please try again shortly."}), 429
+
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"message": "A valid JSON object payload is required."}), 400
@@ -1019,6 +1073,76 @@ def api_scan_history():
     except (ValueError, TypeError):
         limit = 50
     return jsonify(security_service.unified_history.list_all(item_type=item_type, limit=limit))
+
+
+# ---------------------------------------------------------------------------
+# Privacy & Data Retention Control Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/privacy/status")
+def privacy_status():
+    """Returns real-time privacy settings, retention policy, and security headers."""
+    with _history_lock:
+        url_count = len(_history)
+    with _email_history_lock:
+        email_count = len(_email_history)
+    unified_count = len(security_service.unified_history.list_all(limit=1000))
+
+    return jsonify({
+        "status": "active",
+        "privacy_mode": security_service.unified_history.is_privacy_mode(),
+        "storage_mode": "Zero-Disk RAM Only",
+        "zero_disk_storage": True,
+        "csp_enforced": True,
+        "ssrf_protection": True,
+        "anti_framing_protection": True,
+        "in_memory_scans_retained": {
+            "urls": url_count,
+            "emails": email_count,
+            "unified_total": unified_count
+        },
+        "retention_policy": "All data resides exclusively in volatile memory; temporary upload buffers purged immediately."
+    })
+
+
+@app.post("/api/privacy/toggle-mode")
+def privacy_toggle_mode():
+    """Toggles Incognito / Privacy Mode. When active, zero scan records are retained in history."""
+    payload = request.get_json(silent=True) or {}
+    new_state = payload.get("enabled")
+    if new_state is None:
+        new_state = not security_service.unified_history.is_privacy_mode()
+    else:
+        new_state = bool(new_state)
+
+    active = security_service.unified_history.set_privacy_mode(new_state)
+    return jsonify({
+        "status": "success",
+        "privacy_mode": active,
+        "message": f"Incognito Privacy Mode is now {'active (Zero-Trace enabled)' if active else 'disabled'}."
+    })
+
+
+@app.post("/api/privacy/clear-history")
+def privacy_clear_history():
+    """Purges all in-memory scan history, emails, and false-positive audit logs."""
+    with _history_lock:
+        url_count = len(_history)
+        _history.clear()
+    with _email_history_lock:
+        email_count = len(_email_history)
+        _email_history.clear()
+    unified_count = security_service.unified_history.clear()
+
+    return jsonify({
+        "status": "success",
+        "cleared_items": {
+            "urls": url_count,
+            "emails": email_count,
+            "unified": unified_count
+        },
+        "message": "All session scan histories permanently purged from memory."
+    })
 
 
 

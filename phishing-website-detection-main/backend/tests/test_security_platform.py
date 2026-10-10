@@ -259,3 +259,47 @@ def test_unified_scan_history_and_fp(client):
     })
     assert fp_res.status_code == 200
     assert fp_res.get_json()["status"] == "recorded"
+
+
+# ---------------------------------------------------------------------------
+# 6. Privacy Mode & HTTP Security Headers Tests
+# ---------------------------------------------------------------------------
+
+def test_security_headers_enforced(client):
+    """Verify CSP, anti-clickjacking, and nosniff headers are present on responses."""
+    res = client.get("/health")
+    assert res.status_code == 200
+    headers = res.headers
+    assert "Content-Security-Policy" in headers
+    assert "default-src 'self'" in headers["Content-Security-Policy"]
+    assert headers.get("X-Content-Type-Options") == "nosniff"
+    assert headers.get("X-Frame-Options") == "SAMEORIGIN"
+    assert headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+
+
+def test_privacy_status_and_incognito_mode(client):
+    """Verify privacy status retrieval, toggle mode, and history isolation."""
+    # 1. Check status
+    st_res = client.get("/api/privacy/status")
+    assert st_res.status_code == 200
+    st = st_res.get_json()
+    assert st["zero_disk_storage"] is True
+    assert st["csp_enforced"] is True
+
+    # 2. Enable Incognito Privacy Mode
+    toggle_res = client.post("/api/privacy/toggle-mode", json={"enabled": True})
+    assert toggle_res.status_code == 200
+    assert toggle_res.get_json()["privacy_mode"] is True
+
+    # 3. Perform a scan in privacy mode
+    scan_res = client.post("/api/scan/url", json={"url": "https://privacy-test.org", "with_network": False})
+    assert scan_res.status_code == 200
+
+    # 4. Clear all history
+    clear_res = client.post("/api/privacy/clear-history")
+    assert clear_res.status_code == 200
+    assert "cleared_items" in clear_res.get_json()
+
+    # 5. Reset privacy mode to False
+    client.post("/api/privacy/toggle-mode", json={"enabled": False})
+

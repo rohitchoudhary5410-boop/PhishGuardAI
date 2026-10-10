@@ -581,5 +581,53 @@ export const reportFalsePositive = async (scanId, feedback = '', userVerdict = '
   }
 };
 
+/**
+ * Privacy & Security Controls
+ */
+export const getPrivacyStatus = async () => {
+  if (IS_MOCK) {
+    return {
+      status: 'active',
+      privacy_mode: false,
+      storage_mode: 'Zero-Disk RAM Only',
+      zero_disk_storage: true,
+      csp_enforced: true,
+      ssrf_protection: true,
+      in_memory_scans_retained: { urls: 0, emails: 0, unified_total: 0 }
+    };
+  }
+  try {
+    const res = await apiClient.get('/api/privacy/status');
+    return res.data;
+  } catch (error) {
+    throw describeError(error, 'Could not retrieve privacy status.');
+  }
+};
+
+export const togglePrivacyMode = async (enabled) => {
+  if (IS_MOCK) {
+    return { status: 'success', privacy_mode: enabled };
+  }
+  try {
+    const res = await apiClient.post('/api/privacy/toggle-mode', { enabled });
+    return res.data;
+  } catch (error) {
+    throw describeError(error, 'Could not update privacy mode.');
+  }
+};
+
+export const clearAllHistory = async () => {
+  clearApiCache();
+  if (IS_MOCK) {
+    return { status: 'success', message: 'Cleared mock scan history' };
+  }
+  try {
+    const res = await apiClient.post('/api/privacy/clear-history');
+    return res.data;
+  } catch (error) {
+    throw describeError(error, 'Could not purge scan history.');
+  }
+};
+
 export default apiClient;
 

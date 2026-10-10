@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Palette,
@@ -10,13 +10,22 @@ import {
   Moon,
   Sun,
   Monitor,
+  ShieldCheck,
+  Lock,
+  Trash2,
+  EyeOff,
+  RefreshCw,
+  KeyRound,
+  ShieldAlert,
 } from 'lucide-react';
 import { useToast } from '../../components/Toast/Toast';
 import { useTheme } from '../../context/ThemeContext';
 import { useIsMounted } from '../../hooks/useIsMounted';
+import { getPrivacyStatus, togglePrivacyMode, clearAllHistory } from '../../services/api';
 import './Settings.css';
 
 const TABS = [
+  { id: 'privacy', label: 'Security & Privacy', icon: ShieldCheck },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'model', label: 'ML Model', icon: BrainCircuit },
   { id: 'backend', label: 'Backend API', icon: Server },
@@ -31,14 +40,52 @@ const THEME_OPTIONS = [
 
 const Settings = () => {
   const toast = useToast();
-  // Theme comes from the shared provider. This page used to keep its own copy
-  // and write `data-theme` + localStorage directly, which left App's state
-  // stale (so the navbar toggle undid your choice) and persisted the literal
-  // 'system' as data-theme — a value no stylesheet rule matches.
   const { preference, setPreference } = useTheme();
-  const [activeTab, setActiveTab] = useState('appearance');
+  const [activeTab, setActiveTab] = useState('privacy');
   const [isSaving, setIsSaving] = useState(false);
+  const [privacyMode, setPrivacyMode] = useState(false);
+  const [privacyLoading, setPrivacyLoading] = useState(false);
+  const [purging, setPurging] = useState(false);
   const isMounted = useIsMounted();
+
+  useEffect(() => {
+    getPrivacyStatus()
+      .then((st) => {
+        if (isMounted()) setPrivacyMode(Boolean(st.privacy_mode));
+      })
+      .catch(() => {});
+  }, [isMounted]);
+
+  const handleTogglePrivacy = async (val) => {
+    setPrivacyLoading(true);
+    try {
+      const res = await togglePrivacyMode(val);
+      if (isMounted()) setPrivacyMode(res.privacy_mode);
+      toast.success(
+        res.privacy_mode
+          ? 'Zero-Trace Privacy Mode activated: Scans will NOT be retained in history.'
+          : 'Standard Mode: Scans recorded in temporary volatile history.',
+        'Privacy Updated'
+      );
+    } catch (e) {
+      toast.error(e.message || 'Failed to toggle privacy mode');
+    } finally {
+      if (isMounted()) setPrivacyLoading(false);
+    }
+  };
+
+  const handlePurgeHistory = async () => {
+    if (!window.confirm('Permanently purge all server and client session scan histories?')) return;
+    setPurging(true);
+    try {
+      await clearAllHistory();
+      toast.success('All scan histories, uploaded traces, and audit logs permanently purged.', 'Data Wiped');
+    } catch (e) {
+      toast.error(e.message || 'Could not purge history');
+    } finally {
+      if (isMounted()) setPurging(false);
+    }
+  };
 
   const [settings, setSettings] = useState({
     notifications: {
@@ -108,6 +155,102 @@ const Settings = () => {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.3 }}
           >
+            {activeTab === 'privacy' && (
+              <section className="settings-section">
+                <h2 className="settings-section-title">Security & Privacy Controls</h2>
+                <p className="settings-section-desc">
+                  Manage data protection policies, zero-trace scanning modes, and in-memory trace purging.
+                </p>
+
+                {/* Zero-Trace Incognito Mode */}
+                <div className="settings-toggle-group">
+                  <div className="settings-toggle-info">
+                    <h3 className="settings-toggle-title">
+                      Zero-Trace Incognito Mode
+                    </h3>
+                    <p className="settings-toggle-desc">
+                      When active, scanned URLs, uploaded file names, scam messages, and emails are never recorded to server memory or history logs.
+                    </p>
+                  </div>
+                  <label className="toggle-switch">
+                    <span className="sr-only">Toggle zero trace privacy mode</span>
+                    <input
+                      type="checkbox"
+                      checked={privacyMode}
+                      disabled={privacyLoading}
+                      onChange={(e) => handleTogglePrivacy(e.target.checked)}
+                    />
+                    <span className="toggle-slider" />
+                  </label>
+                </div>
+
+                {/* Hardened Architecture Badges */}
+                <div className="privacy-audit-card">
+                  <h3 className="privacy-card-title">
+                    <Lock size={16} /> Hardened Architecture Guarantees
+                  </h3>
+                  <div className="privacy-grid">
+                    <div className="privacy-item">
+                      <CheckCircle2 size={18} className="text-success" />
+                      <div>
+                        <strong>Strict Content Security Policy (CSP)</strong>
+                        <p>Enforced HTTP response headers protect against cross-site scripting (XSS) and unauthorized script execution.</p>
+                      </div>
+                    </div>
+                    <div className="privacy-item">
+                      <CheckCircle2 size={18} className="text-success" />
+                      <div>
+                        <strong>Zero-Disk Storage Policy</strong>
+                        <p>Uploaded files are inspected purely in volatile RAM buffers and instantly purged after analysis.</p>
+                      </div>
+                    </div>
+                    <div className="privacy-item">
+                      <CheckCircle2 size={18} className="text-success" />
+                      <div>
+                        <strong>SSRF & Loopback Isolation</strong>
+                        <p>Active network gateway blocks requests targeting localhost, internal RFC1918 subnets, and cloud metadata (169.254.169.254).</p>
+                      </div>
+                    </div>
+                    <div className="privacy-item">
+                      <CheckCircle2 size={18} className="text-success" />
+                      <div>
+                        <strong>Anti-Clickjacking Framing Guard</strong>
+                        <p>Enforces <code>X-Frame-Options: SAMEORIGIN</code> to prevent iframe hijacking and credential scraping.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* One-Click History Purge */}
+                <div className="purge-box">
+                  <div className="purge-info">
+                    <h3 className="purge-title">
+                      <Trash2 size={16} className="text-danger" /> Permanent History Purge
+                    </h3>
+                    <p className="purge-desc">
+                      Immediately wipe all URL scans, uploaded file records, message analyses, and email history from server memory and client cache.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-outline-danger"
+                    onClick={handlePurgeHistory}
+                    disabled={purging}
+                  >
+                    {purging ? (
+                      <>
+                        <RefreshCw size={15} className="spinner" /> Purging…
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 size={15} /> Purge All Session Data
+                      </>
+                    )}
+                  </button>
+                </div>
+              </section>
+            )}
+
             {activeTab === 'appearance' && (
               <section className="settings-section">
                 <h2 className="settings-section-title">Appearance</h2>

@@ -743,14 +743,37 @@ def analyze_scam_message(message_text: str, score_url_fn=None) -> Dict[str, Any]
 # ---------------------------------------------------------------------------
 
 class UnifiedScanHistory:
-    """Thread-safe multi-vector scan log (URLs, Files, Messages, Emails)."""
+    """Thread-safe multi-vector scan log (URLs, Files, Messages, Emails) with Privacy Mode support."""
 
     def __init__(self, maxlen=500):
         self._lock = threading.Lock()
         self._entries = deque(maxlen=maxlen)
         self._false_positives = []
+        self._privacy_mode = False
+
+    def set_privacy_mode(self, enabled: bool) -> bool:
+        with self._lock:
+            self._privacy_mode = bool(enabled)
+            return self._privacy_mode
+
+    def is_privacy_mode(self) -> bool:
+        with self._lock:
+            return self._privacy_mode
 
     def add(self, item_type: str, target: str, verdict: str, risk_score: int, threat_category: str, details: Dict[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            if self._privacy_mode:
+                return {
+                    "id": f"scan_{uuid.uuid4().hex[:12]}",
+                    "type": item_type,
+                    "target": "[Redacted in Privacy Mode]",
+                    "verdict": verdict,
+                    "risk_score": risk_score,
+                    "threat_category": threat_category,
+                    "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+                    "privacy_mode": True
+                }
+
         entry = {
             "id": f"scan_{uuid.uuid4().hex[:12]}",
             "type": item_type,  # 'url', 'file', 'message', 'email'
@@ -764,6 +787,13 @@ class UnifiedScanHistory:
         with self._lock:
             self._entries.appendleft(entry)
         return entry
+
+    def clear(self) -> int:
+        with self._lock:
+            count = len(self._entries)
+            self._entries.clear()
+            self._false_positives.clear()
+            return count
 
     def list_all(self, item_type: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         with self._lock:
