@@ -33,16 +33,31 @@ const Navbar = () => {
   const { isOpen, isDashboard, close, toggle } = useNav();
   const [apiStatus, setApiStatus] = useState('checking'); // 'checking', 'online', 'offline'
 
+  const verifyHealth = async () => {
+    setApiStatus('checking');
+    try {
+      const isHealthy = await checkApiHealth(true);
+      setApiStatus(isHealthy ? 'online' : 'offline');
+    } catch {
+      setApiStatus('offline');
+    }
+  };
+
   useEffect(() => {
     let active = true;
-    const verifyHealth = async () => {
-      const isHealthy = await checkApiHealth();
-      if (!active) return;
-      setApiStatus(isHealthy ? 'online' : 'offline');
+    const runCheck = async () => {
+      try {
+        const isHealthy = await checkApiHealth();
+        if (!active) return;
+        setApiStatus(isHealthy ? 'online' : 'offline');
+      } catch {
+        if (!active) return;
+        setApiStatus('offline');
+      }
     };
 
-    verifyHealth();
-    const interval = setInterval(verifyHealth, 15000);
+    runCheck();
+    const interval = setInterval(runCheck, 15000);
 
     return () => {
       active = false;
@@ -82,14 +97,18 @@ const Navbar = () => {
           <div className="navbar-actions">
             <div 
               className={`api-status-badge ${apiStatus}`}
+              onClick={verifyHealth}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && verifyHealth()}
               title={
                 IS_MOCK 
-                  ? 'API: Demo Mode (Mock data)' 
+                  ? 'API: Demo Mode (Mock data) — Click to refresh' 
                   : apiStatus === 'checking' 
                     ? 'Checking API connection...' 
                     : apiStatus === 'online' 
-                      ? 'API Status: Connected' 
-                      : 'API Status: Disconnected (Backend offline)'
+                      ? 'API Status: Live & Connected' 
+                      : 'API Status: Disconnected — Click to retry'
               }
               aria-label={
                 IS_MOCK
@@ -99,7 +118,7 @@ const Navbar = () => {
             >
               <span className="api-status-dot" />
               <span className="api-status-text">
-                {IS_MOCK ? 'Demo' : apiStatus === 'checking' ? 'API...' : apiStatus === 'online' ? 'Live' : 'Offline'}
+                {IS_MOCK ? 'Demo' : apiStatus === 'checking' ? 'Connecting...' : apiStatus === 'online' ? 'Online' : 'Offline'}
               </span>
             </div>
             <button

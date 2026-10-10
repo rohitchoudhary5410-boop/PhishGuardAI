@@ -297,14 +297,16 @@ export const getModelMetrics = async () => {
 /**
  * Check if the backend API is reachable and responding (cached for 10s).
  */
-export const checkApiHealth = async () => {
+export const checkApiHealth = async (forceRefresh = false) => {
   if (IS_MOCK) return true;
-  const cached = getCached('api_health', 10000);
-  if (cached !== null) return cached;
+  if (!forceRefresh) {
+    const cached = getCached('api_health', 8000);
+    if (cached !== null) return cached;
+  }
 
   try {
-    const response = await apiClient.get('/health', { timeout: 3000 });
-    const isHealthy = response.status === 200;
+    const response = await apiClient.get('/health', { timeout: 4000 });
+    const isHealthy = response.status === 200 && response.data?.status === 'ok';
     setCached('api_health', isHealthy);
     return isHealthy;
   } catch (error) {
