@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import Navbar from './components/Navbar/Navbar';
 import Footer from './components/Footer/Footer';
@@ -9,20 +9,33 @@ import { ThemeProvider } from './context/ThemeContext';
 import { NavProvider } from './context/NavContext';
 import './App.css';
 
-// Pages
-import Home from './pages/Home/Home';
-import Scanner from './pages/Scanner/Scanner';
-import Dashboard from './pages/Dashboard/Dashboard';
-import Analytics from './pages/Analytics/Analytics';
-import ModelInsights from './pages/ModelInsights/ModelInsights';
-import BulkScanner from './pages/BulkScanner/BulkScanner';
-import History from './pages/History/History';
-import Settings from './pages/Settings/Settings';
-import EmailScanner from './pages/EmailScanner/EmailScanner';
-import DeviceScanner from './pages/DeviceScanner/DeviceScanner';
+// Code-split pages for ultra-fast initial load & smooth tab transitions
+const Home = lazy(() => import('./pages/Home/Home'));
+const Scanner = lazy(() => import('./pages/Scanner/Scanner'));
+const Dashboard = lazy(() => import('./pages/Dashboard/Dashboard'));
+const DeviceScanner = lazy(() => import('./pages/DeviceScanner/DeviceScanner'));
+const EmailScanner = lazy(() => import('./pages/EmailScanner/EmailScanner'));
+const Analytics = lazy(() => import('./pages/Analytics/Analytics'));
+const ModelInsights = lazy(() => import('./pages/ModelInsights/ModelInsights'));
+const BulkScanner = lazy(() => import('./pages/BulkScanner/BulkScanner'));
+const History = lazy(() => import('./pages/History/History'));
+const Settings = lazy(() => import('./pages/Settings/Settings'));
 
-// Routes that render inside DashboardLayout, and therefore hide the marketing
-// footer. Derived from one list so the shell and the router can't drift apart.
+// Smooth top loader & skeleton fallback for page transitions
+const PageLoadingFallback = () => (
+  <>
+    <div className="page-top-loader" aria-hidden="true" />
+    <div className="page-fallback-container">
+      <div className="page-fallback-skeleton">
+        <div className="skeleton-box" style={{ height: '36px', width: '38%' }} />
+        <div className="skeleton-box" style={{ height: '20px', width: '60%' }} />
+        <div className="skeleton-box" style={{ height: '240px', width: '100%', marginTop: '1rem' }} />
+      </div>
+    </div>
+  </>
+);
+
+// Routes that render inside DashboardLayout, hiding the marketing footer.
 const DASHBOARD_ROUTES = [
   '/dashboard',
   '/device-scanner',
@@ -38,10 +51,7 @@ const AppShell = () => {
   const location = useLocation();
   const isDashboard = DASHBOARD_ROUTES.some((path) => location.pathname.startsWith(path));
 
-  // Reset scroll on navigation. `behavior: 'instant'` is required because
-  // index.css sets `scroll-behavior: smooth` on <html> — without it, every
-  // route change animated a long scroll and you watched the previous page's
-  // footer slide past. Smooth scrolling still applies to in-page anchors.
+  // Reset scroll on navigation with instant behavior
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }, [location.pathname]);
@@ -55,26 +65,26 @@ const AppShell = () => {
 
         <Navbar />
 
-        {/* Exactly one <main> per document. DashboardLayout previously rendered a
-            second, nested <main>, which breaks landmark navigation. */}
         <main className="app-main" id="main-content">
-          <Routes>
-            {/* Public */}
-            <Route path="/" element={<Home />} />
-            <Route path="/scanner" element={<Scanner />} />
+          <Suspense fallback={<PageLoadingFallback />}>
+            <Routes>
+              {/* Public */}
+              <Route path="/" element={<Home />} />
+              <Route path="/scanner" element={<Scanner />} />
 
-            {/* Dashboard (with sidebar) */}
-            <Route element={<DashboardLayout />}>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/device-scanner" element={<DeviceScanner />} />
-              <Route path="/email-scanner" element={<EmailScanner />} />
-              <Route path="/analytics" element={<Analytics />} />
-              <Route path="/model-insights" element={<ModelInsights />} />
-              <Route path="/bulk-scanner" element={<BulkScanner />} />
-              <Route path="/history" element={<History />} />
-              <Route path="/settings" element={<Settings />} />
-            </Route>
-          </Routes>
+              {/* Dashboard (with sidebar) */}
+              <Route element={<DashboardLayout />}>
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/device-scanner" element={<DeviceScanner />} />
+                <Route path="/email-scanner" element={<EmailScanner />} />
+                <Route path="/analytics" element={<Analytics />} />
+                <Route path="/model-insights" element={<ModelInsights />} />
+                <Route path="/bulk-scanner" element={<BulkScanner />} />
+                <Route path="/history" element={<History />} />
+                <Route path="/settings" element={<Settings />} />
+              </Route>
+            </Routes>
+          </Suspense>
         </main>
 
         {!isDashboard && <Footer />}

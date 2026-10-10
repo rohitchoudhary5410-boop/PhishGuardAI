@@ -112,6 +112,12 @@ export const ToastProvider = ({ children }) => {
       error: (message, title) => addToast({ type: 'error', title, message, duration: 6000 }),
       warning: (message, title) => addToast({ type: 'warning', title, message }),
       info: (message, title) => addToast({ type: 'info', title, message }),
+      addToast: (messageOrObj, type = 'info') => {
+        if (typeof messageOrObj === 'object' && messageOrObj !== null) {
+          return addToast(messageOrObj);
+        }
+        return addToast({ type, message: String(messageOrObj) });
+      },
       dismiss: removeToast,
     }),
     [addToast, removeToast]

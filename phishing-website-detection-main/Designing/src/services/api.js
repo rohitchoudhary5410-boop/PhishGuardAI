@@ -202,6 +202,33 @@ export const bulkScan = async (urls) => {
   }
 };
 
+// In-memory cache for ultra-fast, smooth 0ms tab transitions
+const apiCache = new Map();
+
+const getCached = (key, ttlMs = 15000) => {
+  const item = apiCache.get(key);
+  if (!item) return null;
+  if (Date.now() - item.timestamp > ttlMs) {
+    apiCache.delete(key);
+    return null;
+  }
+  return item.data;
+};
+
+const setCached = (key, data) => {
+  apiCache.set(key, { data, timestamp: Date.now() });
+};
+
+export const clearApiCache = (keyPrefix) => {
+  if (!keyPrefix) {
+    apiCache.clear();
+    return;
+  }
+  for (const k of apiCache.keys()) {
+    if (k.startsWith(keyPrefix)) apiCache.delete(k);
+  }
+};
+
 /**
  * Get scan history
  */
@@ -223,7 +250,7 @@ export const getScanHistory = async (filters = {}) => {
 /**
  * Get analytics data.
  * Live mode aggregates only what this backend process has actually scanned, so
- * it legitimately starts empty.
+ * it legitimately starts empty. Cached for 15s to make tab switching instantaneous.
  */
 export const getAnalytics = async (timeRange = '30D') => {
   if (IS_MOCK) {
@@ -232,8 +259,13 @@ export const getAnalytics = async (timeRange = '30D') => {
     return mockAnalytics;
   }
 
+  const cacheKey = `analytics_${timeRange}`;
+  const cached = getCached(cacheKey, 15000);
+  if (cached) return cached;
+
   try {
     const response = await apiClient.get('/analytics', { params: { range: timeRange } });
+    setCached(cacheKey, response.data);
     return response.data;
   } catch (error) {
     throw describeError(error, 'Could not load analytics.');
@@ -241,7 +273,7 @@ export const getAnalytics = async (timeRange = '30D') => {
 };
 
 /**
- * Get model metrics
+ * Get model metrics (cached for 60s for immediate page loads)
  */
 export const getModelMetrics = async () => {
   if (IS_MOCK) {
@@ -250,8 +282,12 @@ export const getModelMetrics = async () => {
     return mockModelMetrics;
   }
 
+  const cached = getCached('model_metrics', 60000);
+  if (cached) return cached;
+
   try {
     const response = await apiClient.get('/model-metrics');
+    setCached('model_metrics', response.data);
     return response.data;
   } catch (error) {
     throw describeError(error, 'Could not load model metrics.');
@@ -259,14 +295,20 @@ export const getModelMetrics = async () => {
 };
 
 /**
- * Check if the backend API is reachable and responding.
+ * Check if the backend API is reachable and responding (cached for 10s).
  */
 export const checkApiHealth = async () => {
   if (IS_MOCK) return true;
+  const cached = getCached('api_health', 10000);
+  if (cached !== null) return cached;
+
   try {
     const response = await apiClient.get('/health', { timeout: 3000 });
-    return response.status === 200;
+    const isHealthy = response.status === 200;
+    setCached('api_health', isHealthy);
+    return isHealthy;
   } catch (error) {
+    setCached('api_health', false);
     return false;
   }
 };
@@ -277,6 +319,7 @@ export const checkApiHealth = async () => {
 export const scanEmail = async (emailPayload) => {
   try {
     const response = await apiClient.post('/api/email/scan', emailPayload);
+    clearApiCache('analytics');
     return response.data;
   } catch (error) {
     throw describeError(error, 'Could not scan email threat.');
@@ -284,11 +327,15 @@ export const scanEmail = async (emailPayload) => {
 };
 
 /**
- * Fetch preset email attack scenarios for demonstrations
+ * Fetch preset email attack scenarios for demonstrations (cached for 2m)
  */
 export const getEmailPresets = async () => {
+  const cached = getCached('email_presets', 120000);
+  if (cached) return cached;
+
   try {
     const response = await apiClient.get('/api/email/presets');
+    setCached('email_presets', response.data);
     return response.data;
   } catch (error) {
     throw describeError(error, 'Could not load preset emails.');
