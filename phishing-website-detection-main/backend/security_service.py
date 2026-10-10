@@ -329,6 +329,29 @@ def scan_file_buffer(file_bytes: bytes, filename: str) -> Dict[str, Any]:
     checks for disguised executables, queries known hash databases, and inspects ZIP archives safely.
     """
     file_size = len(file_bytes)
+    if file_size == 0:
+        return {
+            "filename": filename,
+            "file_size_bytes": 0,
+            "formatted_size": "0 B",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+            "md5": "d41d8cd98f00b204e9800998ecf8427e",
+            "detected_type": "Empty File",
+            "file_category": "empty",
+            "verdict": "Clean",
+            "threat_category": "No Threat Detected (Empty)",
+            "risk_score": 0,
+            "reasons": ["The selected file is empty (0 bytes) and contains no executable data."],
+            "pe_details": None,
+            "archive_details": None,
+            "recommendations": ["Empty file is clean and poses no threat."],
+            "antivirus_adapter": "Built-in Signature & Hash Scanner",
+            "privacy_notice": "File was processed entirely in memory and was not stored on disk or shared with third parties.",
+            "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "scan_id": f"file_{uuid.uuid4().hex[:10]}"
+        }
+
     if file_size > MAX_FILE_SIZE_BYTES:
         return {
             "filename": filename,
@@ -747,7 +770,8 @@ class UnifiedScanHistory:
             items = list(self._entries)
         if item_type and item_type != "all":
             items = [item for item in items if item["type"] == item_type]
-        return items[:limit]
+        safe_limit = max(1, limit) if isinstance(limit, int) else 50
+        return items[:safe_limit]
 
     def record_false_positive(self, scan_id: str, feedback: str, user_verdict: str = "Safe") -> Dict[str, Any]:
         record = {

@@ -30,8 +30,17 @@ from collections import Counter, deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
+try:
+    from sklearn.exceptions import InconsistentVersionWarning
+    warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
+except ImportError:
+    pass
+
 import joblib
 import numpy as np
+import pandas as pd
 from flask import Flask, jsonify, request, redirect, render_template
 from flask_cors import CORS
 
@@ -202,8 +211,10 @@ def score_url(url: str, overrides: dict | None = None, with_network: bool = True
     vector, named, clamped = extract_features(
         url, with_network=with_network, timeout=LOOKUP_TIMEOUT, overrides=overrides
     )
-    scaled = scaler.transform(np.array([vector], dtype=float))
-    p_phishing = float(model.predict_proba(scaled)[0][PHISHING_INDEX])
+    df_vector = pd.DataFrame([vector], columns=FEATURE_ORDER, dtype=float)
+    scaled = scaler.transform(df_vector)
+    scaled_df = pd.DataFrame(scaled, columns=FEATURE_ORDER)
+    p_phishing = float(model.predict_proba(scaled_df)[0][PHISHING_INDEX])
     prediction, confidence = _verdict(p_phishing)
 
     unavailable = [name for name in FEATURE_ORDER if named[name] == -1]
@@ -232,14 +243,15 @@ def score_url(url: str, overrides: dict | None = None, with_network: bool = True
 
 
 def _record(result: dict) -> None:
-    is_threat = result.get("prediction") in ("Phishing", "Suspicious")
+    verdict = result.get("verdict") or result.get("prediction", "Unknown")
+    is_threat = verdict in ("Phishing", "Suspicious", "Blocked", "Malicious")
     security_service.protection_manager.record_scan(is_threat=is_threat)
     security_service.unified_history.add(
         item_type="url",
         target=result.get("url", ""),
-        verdict=result.get("prediction", "Unknown"),
+        verdict=verdict,
         risk_score=result.get("risk_score", 0),
-        threat_category="Phishing URL" if is_threat else "Legitimate URL",
+        threat_category=result.get("threat_category") or ("Phishing URL" if is_threat else "Legitimate URL"),
         details=result
     )
     with _history_lock:
@@ -247,7 +259,7 @@ def _record(result: dict) -> None:
             {
                 "id": result["scan_id"],
                 "url": result["url"],
-                "prediction": result["prediction"],
+                "prediction": verdict,
                 "probability": result["probability"],
                 "risk_score": result["risk_score"],
                 "phishing_probability": result.get("phishing_probability"),
@@ -921,6 +933,7 @@ def api_scan_url():
             reasons.append("Clean URL structure matching established legitimate web standards.")
 
     model_result["verdict"] = verdict
+    model_result["prediction"] = verdict
     model_result["risk_score"] = composite_risk
     model_result["threat_category"] = threat_cat
     model_result["detection_reasons"] = reasons
@@ -946,10 +959,14 @@ def api_scan_file():
     if not file or not file.filename:
         return jsonify({"message": "No file selected."}), 400
 
-    file_bytes = file.read()
-    filename = file.filename
+    try:
+        file_bytes = file.read()
+        filename = file.filename
+        result = security_service.scan_file_buffer(file_bytes, filename)
+    except Exception as exc:
+        app.logger.exception("File analysis failed")
+        return jsonify({"message": f"File analysis failed: {exc}"}), 500
 
-    result = security_service.scan_file_buffer(file_bytes, filename)
     security_service.unified_history.add(
         item_type="file",
         target=filename,
@@ -976,7 +993,12 @@ def api_scan_message():
     if not msg:
         return jsonify({"message": "Please provide 'message' text to evaluate."}), 400
 
-    result = security_service.analyze_scam_message(msg, score_url_fn=_score_url_for_email)
+    try:
+        result = security_service.analyze_scam_message(msg, score_url_fn=_score_url_for_email)
+    except Exception as exc:
+        app.logger.exception("Message analysis failed")
+        return jsonify({"message": f"Message analysis failed: {exc}"}), 500
+
     security_service.unified_history.add(
         item_type="message",
         target=result.get("message_snippet", msg[:60]),
@@ -992,7 +1014,10 @@ def api_scan_message():
 def api_scan_history():
     """Returns unified scan history across URLs, files, messages, and emails."""
     item_type = request.args.get("type", "all")
-    limit = int(request.args.get("limit", 50))
+    try:
+        limit = min(max(1, int(request.args.get("limit", 50))), 500)
+    except (ValueError, TypeError):
+        limit = 50
     return jsonify(security_service.unified_history.list_all(item_type=item_type, limit=limit))
 
 
