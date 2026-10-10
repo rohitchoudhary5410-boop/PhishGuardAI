@@ -1,0 +1,41 @@
+# Large Archives & Binaries (Prevents Vercel BAD_GATEWAY upload errors)
+*.zip
+*.tar.gz
+*.7z
+phishing-website-detection-main.zip
+*.pkl
+**/*.pkl
+
+# Python Backend & Virtual Environments (Vercel is deploying frontend only)
+phishing-website-detection-main/backend/
+phishing-website-detection-main/models/
+phishing-website-detection-main/data/
+phishing-website-detection-main/notebook/
+phishing-website-detection-main/venv/
+phishing-website-detection-main/images/
+phishing-website-detection-main/extension/
+features.py
+*.py
+**/*.py
+venv/
+.venv/
+**/venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+**/.pytest_cache/
+*.pyc
+
+# Dependencies & Local Build Artefacts
+node_modules/
+**/node_modules/
+.git/
+.github/
+.vscode/
+.idea/
+*.log
+
+# Local environment variables
+.env.local
+.env

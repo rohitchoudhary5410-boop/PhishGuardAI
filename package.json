@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm --prefix phishing-website-detection-main/Designing run build",
+    "build": "npm --prefix phishing-website-detection-main/Designing install && npm --prefix phishing-website-detection-main/Designing run build && node -e \"const fs=require('fs'); fs.cpSync('phishing-website-detection-main/Designing/dist', 'dist', {recursive: true});\"",
     "dev": "npm --prefix phishing-website-detection-main/Designing run dev",
     "preview": "npm --prefix phishing-website-detection-main/Designing run preview"
   }
